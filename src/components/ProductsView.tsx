@@ -6,7 +6,8 @@ import { Product } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 export function ProductsView() {
-  const { products, addProduct, updateProduct, deleteProduct, loading } = useProducts();
+  const { products, addProduct, updateProduct, deleteProduct, loading } =
+    useProducts();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -14,14 +15,14 @@ export function ProductsView() {
     price: '',
     production_cost: '',
     stock: '',
-    category: 'burgers',
+    category: 'hamburguesas',
     active: true,
   });
 
   const categories = [
-    { value: 'burgers', label: 'Burgers' },
-    { value: 'sides', label: 'Sides' },
-    { value: 'drinks', label: 'Drinks' },
+    { value: 'hamburguesas', label: 'Hamburguesas' },
+    { value: 'papas fritas', label: 'Papas Fritas' },
+    { value: 'bebidas', label: 'Bebidas' },
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,10 +49,21 @@ export function ProductsView() {
         });
       }
 
-      setFormData({ name: '', price: '', production_cost: '', stock: '', category: 'burgers', active: true });
+      setFormData({
+        name: '',
+        price: '',
+        production_cost: '',
+        stock: '',
+        category: 'hamburguesas',
+        active: true,
+      });
       setShowForm(false);
       setEditingId(null);
-      toast.success(editingId ? 'Producto actualizado exitosamente' : 'Producto agregado exitosamente');
+      toast.success(
+        editingId
+          ? 'Producto actualizado exitosamente'
+          : 'Producto agregado exitosamente'
+      );
     } catch (error) {
       toast.error('Error al guardar el producto');
     }
@@ -92,96 +104,172 @@ export function ProductsView() {
   };
 
   const handleCancel = () => {
-    setFormData({ name: '', price: '', production_cost: '', stock: '', category: 'burgers', active: true });
+    setFormData({
+      name: '',
+      price: '',
+      production_cost: '',
+      stock: '',
+      category: 'hamburguesas',
+      active: true,
+    });
     setShowForm(false);
     setEditingId(null);
   };
 
   if (loading) {
-    return <div className="p-6 dark:text-white">Loading...</div>;
+    return <div className='p-6 dark:text-white'>Cargando...</div>;
   }
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>Products</h1>
+    <div className='p-6'>
+      <div className='flex justify-between items-center mb-6'>
+        <h1
+          className='text-3xl font-bold'
+          style={{ color: 'var(--color-text)' }}
+        >
+          Productos
+        </h1>
         {!showForm && (
           <button
             onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold"
+            className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
             <Plus size={20} />
-            Add Product
+            Añadir Producto
           </button>
         )}
       </div>
 
       {showForm && (
-        <div className="rounded-lg shadow-md p-6 mb-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>
-            {editingId ? 'Edit Product' : 'New Product'}
+        <div
+          className='rounded-lg shadow-md p-6 mb-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <h2
+            className='text-xl font-bold mb-4'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {editingId ? 'Editar Producto' : 'Nuevo Producto'}
           </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className='space-y-4'>
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Name</label>
+              <label
+                className='block text-sm font-medium mb-1'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Nombre
+              </label>
               <input
-                type="text"
+                type='text'
                 required
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-text)' }}
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                className='w-full px-3 py-2 border rounded-lg'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-text)',
+                }}
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className='grid grid-cols-2 gap-4'>
               <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Sale Price ($)</label>
+                <label
+                  className='block text-sm font-medium mb-1'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Precio de Venta ($)
+                </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type='number'
+                  step='0.01'
                   required
                   value={formData.price}
-                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-text)' }}
+                  onChange={(e) =>
+                    setFormData({ ...formData, price: e.target.value })
+                  }
+                  className='w-full px-3 py-2 border rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                    borderColor: 'var(--color-text)',
+                  }}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Production Cost ($)</label>
+                <label
+                  className='block text-sm font-medium mb-1'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Costo ($)
+                </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type='number'
+                  step='0.01'
                   required
                   value={formData.production_cost}
-                  onChange={(e) => setFormData({ ...formData, production_cost: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg"
-                  style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-text)' }}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      production_cost: e.target.value,
+                    })
+                  }
+                  className='w-full px-3 py-2 border rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                    borderColor: 'var(--color-text)',
+                  }}
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Stock</label>
+              <label
+                className='block text-sm font-medium mb-1'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Stock
+              </label>
               <input
-                type="number"
+                type='number'
                 required
                 value={formData.stock}
-                onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-text)' }}
+                onChange={(e) =>
+                  setFormData({ ...formData, stock: e.target.value })
+                }
+                className='w-full px-3 py-2 border rounded-lg'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-text)',
+                }}
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text)' }}>Category</label>
+              <label
+                className='block text-sm font-medium mb-1'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Categoría
+              </label>
               <select
                 value={formData.category}
-                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                className="w-full px-3 py-2 border rounded-lg"
-                style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-text)' }}
+                onChange={(e) =>
+                  setFormData({ ...formData, category: e.target.value })
+                }
+                className='w-full px-3 py-2 border rounded-lg'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-text)',
+                }}
               >
                 {categories.map((cat) => (
                   <option key={cat.value} value={cat.value}>
@@ -191,100 +279,159 @@ export function ProductsView() {
               </select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className='flex items-center gap-2'>
               <input
-                type="checkbox"
-                id="active"
+                type='checkbox'
+                id='active'
                 checked={formData.active}
-                onChange={(e) => setFormData({ ...formData, active: e.target.checked })}
-                className="w-4 h-4"
+                onChange={(e) =>
+                  setFormData({ ...formData, active: e.target.checked })
+                }
+                className='w-4 h-4'
               />
-              <label htmlFor="active" className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-                Active
+              <label
+                htmlFor='active'
+                className='text-sm font-medium'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Activo
               </label>
             </div>
 
-            <div className="flex gap-2">
+            <div className='flex gap-2'>
               <button
-                type="submit"
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold"
+                type='submit'
+                className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 <Save size={18} />
-                {editingId ? 'Update' : 'Save'}
+                {editingId ? 'Actualizar' : 'Guardar'}
               </button>
               <button
-                type="button"
+                type='button'
                 onClick={handleCancel}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold"
+                className='flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold'
               >
                 <X size={18} />
-                Cancel
+                Cancelar
               </button>
             </div>
           </form>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
         {products.map((product) => (
           <div
             key={product.id}
-            className="rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow border-2"
-            style={{ backgroundColor: 'var(--color-background-secondary)', borderColor: 'var(--color-primary)' }}
+            className='rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow border-2'
+            style={{
+              backgroundColor: 'var(--color-background-secondary)',
+              borderColor: 'var(--color-primary)',
+            }}
           >
-            <div className="flex justify-between items-start mb-2">
+            <div className='flex justify-between items-start mb-2'>
               <div>
-                <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{product.name}</h3>
-                <p className="text-sm opacity-60 capitalize" style={{ color: 'var(--color-text)' }}>{product.category}</p>
+                <h3
+                  className='text-lg font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {product.name}
+                </h3>
+                <p
+                  className='text-sm opacity-60 capitalize'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {product.category}
+                </p>
               </div>
-              <div className="flex gap-2">
+              <div className='flex gap-2'>
                 <button
                   onClick={() => handleEdit(product)}
-                  className="text-blue-500 hover:text-blue-700"
+                  className='text-blue-500 hover:text-blue-700'
                 >
                   <Edit2 size={18} />
                 </button>
                 <button
                   onClick={() => handleDelete(product.id)}
-                  className="text-red-500 hover:text-red-700"
+                  className='text-red-500 hover:text-red-700'
                 >
                   <Trash2 size={18} />
                 </button>
               </div>
             </div>
 
-            <div className="space-y-1">
-              <div className="flex justify-between">
-                <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Sale Price:</span>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(product.price)}</span>
+            <div className='space-y-1'>
+              <div className='flex justify-between'>
+                <span
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Precio de Venta:
+                </span>
+                <span
+                  className='font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {formatPrice(product.price)}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Cost:</span>
-                <span className="font-bold opacity-60" style={{ color: 'var(--color-text)' }}>{formatPrice(product.production_cost)}</span>
+              <div className='flex justify-between'>
+                <span
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Costo:
+                </span>
+                <span
+                  className='font-bold opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {formatPrice(product.production_cost)}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Margin:</span>
-                <span className="font-bold" style={{ color: 'var(--color-primary)' }}>
+              <div className='flex justify-between'>
+                <span
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Margen:
+                </span>
+                <span
+                  className='font-bold'
+                  style={{ color: 'var(--color-primary)' }}
+                >
                   {formatPrice(product.price - product.production_cost)}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Stock:</span>
+              <div className='flex justify-between'>
                 <span
-                  className="font-bold"
-                  style={{ color: product.stock < 10 ? '#ef4444' : 'var(--color-text)' }}
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Stock:
+                </span>
+                <span
+                  className='font-bold'
+                  style={{
+                    color: product.stock < 10 ? '#ef4444' : 'var(--color-text)',
+                  }}
                 >
                   {formatNumber(product.stock)}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Status:</span>
+              <div className='flex justify-between'>
                 <span
-                  className="font-semibold"
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Estado:
+                </span>
+                <span
+                  className='font-semibold'
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {product.active ? 'Active' : 'Inactive'}
+                  {product.active ? 'Activo' : 'Inactivo'}
                 </span>
               </div>
             </div>

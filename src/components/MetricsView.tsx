@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, DollarSign, ShoppingCart, Package, TrendingDown, Filter } from 'lucide-react';
+import {
+  TrendingUp,
+  DollarSign,
+  ShoppingCart,
+  Package,
+  TrendingDown,
+  Filter,
+} from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
 import { db, SaleItem } from '../lib/indexeddb';
@@ -25,14 +32,18 @@ export function MetricsView() {
   const [dailySales, setDailySales] = useState<DailySales[]>([]);
   const [topProducts, setTopProducts] = useState<ProductSales[]>([]);
   const [allSoldProducts, setAllSoldProducts] = useState<ProductSales[]>([]);
-  const [mostProfitableProducts, setMostProfitableProducts] = useState<ProductSales[]>([]);
+  const [mostProfitableProducts, setMostProfitableProducts] = useState<
+    ProductSales[]
+  >([]);
   const [totalProfit, setTotalProfit] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [specificDate, setSpecificDate] = useState<string>('');
-  const [filteredSalesState, setFilteredSalesState] = useState<typeof sales>([]);
+  const [filteredSalesState, setFilteredSalesState] = useState<typeof sales>(
+    []
+  );
 
   useEffect(() => {
     calculateMetrics();
@@ -52,9 +63,19 @@ export function MetricsView() {
       filterEndDate = new Date(year, month - 1, day, 23, 59, 59, 999);
     } else if (dateFilter === 'custom') {
       if (!startDate || !endDate) return salesToFilter;
-      const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+      const [startYear, startMonth, startDay] = startDate
+        .split('-')
+        .map(Number);
       const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
-      filterStartDate = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+      filterStartDate = new Date(
+        startYear,
+        startMonth - 1,
+        startDay,
+        0,
+        0,
+        0,
+        0
+      );
       filterEndDate = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
     } else {
       switch (dateFilter) {
@@ -100,7 +121,7 @@ export function MetricsView() {
       }
     }
 
-    return salesToFilter.filter(sale => {
+    return salesToFilter.filter((sale) => {
       const saleDate = new Date(sale.completed_at);
       return saleDate >= filterStartDate && saleDate <= filterEndDate;
     });
@@ -112,18 +133,21 @@ export function MetricsView() {
 
     const dateFilteredSales = filterSalesByDate(sales);
 
-    const filteredSaleItems = categoryFilter === 'all'
-      ? allSaleItems
-      : allSaleItems.filter(item => {
-          const product = products.find(p => p.id === item.product_id);
-          return product?.category === categoryFilter;
-        });
+    const filteredSaleItems =
+      categoryFilter === 'all'
+        ? allSaleItems
+        : allSaleItems.filter((item) => {
+            const product = products.find((p) => p.id === item.product_id);
+            return product?.category === categoryFilter;
+          });
 
-    const relevantSaleIds = new Set(filteredSaleItems.map(item => item.sale_id));
+    const relevantSaleIds = new Set(
+      filteredSaleItems.map((item) => item.sale_id)
+    );
 
     const salesByDate: { [key: string]: { total: number; count: number } } = {};
-    const filteredSales = dateFilteredSales.filter(sale =>
-      categoryFilter === 'all' || relevantSaleIds.has(sale.id)
+    const filteredSales = dateFilteredSales.filter(
+      (sale) => categoryFilter === 'all' || relevantSaleIds.has(sale.id)
     );
 
     setFilteredSalesState(filteredSales);
@@ -148,19 +172,26 @@ export function MetricsView() {
 
     setDailySales(dailyData);
 
-    const filteredSaleIds = new Set(filteredSales.map(s => s.id));
-    const dateAndCategoryFilteredItems = filteredSaleItems.filter(item =>
+    const filteredSaleIds = new Set(filteredSales.map((s) => s.id));
+    const dateAndCategoryFilteredItems = filteredSaleItems.filter((item) =>
       filteredSaleIds.has(item.sale_id)
     );
 
-    const productSales: { [key: string]: { quantity: number; revenue: number; profit: number } } = {};
+    const productSales: {
+      [key: string]: { quantity: number; revenue: number; profit: number };
+    } = {};
     let profit = 0;
 
     dateAndCategoryFilteredItems.forEach((item: SaleItem) => {
       if (!productSales[item.product_name]) {
-        productSales[item.product_name] = { quantity: 0, revenue: 0, profit: 0 };
+        productSales[item.product_name] = {
+          quantity: 0,
+          revenue: 0,
+          profit: 0,
+        };
       }
-      const itemProfit = (item.product_price - (item.production_cost || 0)) * item.quantity;
+      const itemProfit =
+        (item.product_price - (item.production_cost || 0)) * item.quantity;
       productSales[item.product_name].quantity += item.quantity;
       productSales[item.product_name].revenue += item.subtotal;
       productSales[item.product_name].profit += itemProfit;
@@ -195,20 +226,29 @@ export function MetricsView() {
     setMostProfitableProducts(mostProfitableData);
   };
 
-  const filteredProducts = categoryFilter === 'all' ? products : products.filter(p => p.category === categoryFilter);
+  const filteredProducts =
+    categoryFilter === 'all'
+      ? products
+      : products.filter((p) => p.category === categoryFilter);
 
-  const totalRevenue = filteredSalesState.reduce((sum, sale) => sum + sale.total_amount, 0);
+  const totalRevenue = filteredSalesState.reduce(
+    (sum, sale) => sum + sale.total_amount,
+    0
+  );
   const totalSales = filteredSalesState.length;
   const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
-  const totalInventoryValue = filteredProducts.reduce((sum, product) => sum + product.price * product.stock, 0);
+  const totalInventoryValue = filteredProducts.reduce(
+    (sum, product) => sum + product.price * product.stock,
+    0
+  );
 
-  const maxDailySale = Math.max(...dailySales.map((d) => d.total), 1);
+  // const maxDailySale = Math.max(...dailySales.map((d) => d.total), 1);
 
   const categories = [
-    { value: 'all', label: 'All Categories' },
-    { value: 'burgers', label: 'Burgers' },
-    { value: 'sides', label: 'Sides' },
-    { value: 'drinks', label: 'Drinks' },
+    { value: 'all', label: 'Todas las Categorías' },
+    { value: 'hamburguesas', label: 'Hamburguesas' },
+    { value: 'papas fritas', label: 'Papas Fritas' },
+    { value: 'bebidas', label: 'Bebidas' },
   ];
 
   const dateFilters = [
@@ -224,18 +264,32 @@ export function MetricsView() {
   ];
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>Metrics & Analytics</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
+    <div className='p-6'>
+      <div className='mb-6'>
+        <h1
+          className='text-3xl font-bold mb-4'
+          style={{ color: 'var(--color-text)' }}
+        >
+          Metrics & Analytics
+        </h1>
+        <div className='flex flex-wrap items-center gap-3'>
+          <div className='flex items-center gap-2'>
             <Filter size={20} style={{ color: 'var(--color-text)' }} />
-            <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Category:</span>
+            <span
+              className='text-sm opacity-60'
+              style={{ color: 'var(--color-text)' }}
+            >
+              Category:
+            </span>
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-4 py-2 rounded-lg border font-semibold"
-              style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-primary)' }}
+              className='px-4 py-2 rounded-lg border font-semibold'
+              style={{
+                backgroundColor: 'var(--color-background-accent)',
+                color: 'var(--color-text)',
+                borderColor: 'var(--color-primary)',
+              }}
             >
               {categories.map((cat) => (
                 <option key={cat.value} value={cat.value}>
@@ -245,13 +299,22 @@ export function MetricsView() {
             </select>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>Date:</span>
+          <div className='flex items-center gap-2'>
+            <span
+              className='text-sm opacity-60'
+              style={{ color: 'var(--color-text)' }}
+            >
+              Date:
+            </span>
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="px-4 py-2 rounded-lg border font-semibold"
-              style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-primary)' }}
+              className='px-4 py-2 rounded-lg border font-semibold'
+              style={{
+                backgroundColor: 'var(--color-background-accent)',
+                color: 'var(--color-text)',
+                borderColor: 'var(--color-primary)',
+              }}
             >
               {dateFilters.map((filter) => (
                 <option key={filter.value} value={filter.value}>
@@ -263,111 +326,212 @@ export function MetricsView() {
 
           {dateFilter === 'specific' && (
             <input
-              type="date"
+              type='date'
               value={specificDate}
               onChange={(e) => setSpecificDate(e.target.value)}
-              className="px-4 py-2 rounded-lg border"
-              style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-primary)' }}
+              className='px-4 py-2 rounded-lg border'
+              style={{
+                backgroundColor: 'var(--color-background-accent)',
+                color: 'var(--color-text)',
+                borderColor: 'var(--color-primary)',
+              }}
             />
           )}
 
           {dateFilter === 'custom' && (
             <>
               <input
-                type="date"
+                type='date'
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="px-4 py-2 rounded-lg border"
-                style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-primary)' }}
+                className='px-4 py-2 rounded-lg border'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-primary)',
+                }}
               />
-              <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>to</span>
+              <span
+                className='text-sm opacity-60'
+                style={{ color: 'var(--color-text)' }}
+              >
+                to
+              </span>
               <input
-                type="date"
+                type='date'
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="px-4 py-2 rounded-lg border"
-                style={{ backgroundColor: 'var(--color-background-accent)', color: 'var(--color-text)', borderColor: 'var(--color-primary)' }}
+                className='px-4 py-2 rounded-lg border'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-primary)',
+                }}
               />
             </>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="opacity-60" style={{ color: 'var(--color-text)' }}>Total Revenue</div>
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6'>
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+              Ingresos Totales
+            </div>
             <DollarSign size={24} style={{ color: 'var(--color-primary)' }} />
           </div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(totalRevenue)}</div>
-        </div>
-
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="opacity-60" style={{ color: 'var(--color-text)' }}>Total Sales</div>
-            <ShoppingCart size={24} style={{ color: 'var(--color-accent)' }} />
+          <div
+            className='text-3xl font-bold'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {formatPrice(totalRevenue)}
           </div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>{totalSales}</div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="opacity-60" style={{ color: 'var(--color-text)' }}>Average Sale</div>
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+              Ventas Totales
+            </div>
+            <ShoppingCart size={24} style={{ color: 'var(--color-primary)' }} />
+          </div>
+          <div
+            className='text-3xl font-bold'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {totalSales}
+          </div>
+        </div>
+
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+              Venta Promedio
+            </div>
             <TrendingUp size={24} style={{ color: 'var(--color-primary)' }} />
           </div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(averageSale)}</div>
+          <div
+            className='text-3xl font-bold'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {formatPrice(averageSale)}
+          </div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="opacity-60" style={{ color: 'var(--color-text)' }}>Total Profit</div>
-            <TrendingUp size={24} style={{ color: 'var(--color-accent)' }} />
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+              Ganancia Total
+            </div>
+            <TrendingUp size={24} style={{ color: 'var(--color-primary)' }} />
           </div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(totalProfit)}</div>
+          <div
+            className='text-3xl font-bold'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {formatPrice(totalProfit)}
+          </div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="opacity-60" style={{ color: 'var(--color-text)' }}>Inventory Value</div>
-            <Package size={24} style={{ color: 'var(--color-accent)' }} />
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-2'>
+            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+              Valor del Inventario
+            </div>
+            <Package size={24} style={{ color: 'var(--color-primary)' }} />
           </div>
-          <div className="text-3xl font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(totalInventoryValue)}</div>
+          <div
+            className='text-3xl font-bold'
+            style={{ color: 'var(--color-text)' }}
+          >
+            {formatPrice(totalInventoryValue)}
+          </div>
         </div>
       </div>
 
-      <div className="mb-6">
+      <div className='mb-6'>
         <SalesChart sales={filteredSalesState} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>Productos Más Rentables</h2>
-          <div className="space-y-4">
+      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <h2
+            className='text-xl font-bold mb-4'
+            style={{ color: 'var(--color-text)' }}
+          >
+            Productos Más Rentables
+          </h2>
+          <div className='space-y-4'>
             {mostProfitableProducts.length === 0 ? (
-              <div className="text-center text-gray-400 py-8">Aún no hay ventas de productos</div>
+              <div className='text-center text-gray-400 py-8'>
+                Aún no hay ventas de productos
+              </div>
             ) : (
               mostProfitableProducts.map((product, index) => (
-                <div key={product.product_name} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
-                  <div className="flex items-center gap-3 mb-2">
+                <div
+                  key={product.product_name}
+                  className='p-4 rounded-lg'
+                  style={{ backgroundColor: 'var(--color-background-accent)' }}
+                >
+                  <div className='flex items-center gap-3 mb-2'>
                     <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold"
-                      style={{ backgroundColor: 'var(--color-accent)' }}
+                      className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
+                      style={{
+                        backgroundColor: 'var(--color-background-secondary)',
+                      }}
                     >
                       {index + 1}
                     </div>
-                    <div className="flex-1">
-                      <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{product.product_name}</div>
-                      <div className="text-sm opacity-60 mt-1" style={{ color: 'var(--color-text)' }}>
-                        {formatNumber(product.quantity)} unidades vendidas
+                    <div className='flex-1'>
+                      <div
+                        className='font-semibold'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {product.product_name}
                       </div>
-                      <div className="text-xs mt-1 opacity-60" style={{ color: 'var(--color-text)' }}>
-                        Revenue: {formatPrice(product.revenue)}
+                      <div
+                        className='text-sm opacity-60 mt-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {formatNumber(product.quantity)} unidad/es vendidas
+                      </div>
+                      <div
+                        className='text-xs mt-1 opacity-60'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Ingreso: {formatPrice(product.revenue)}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-xs opacity-60 mb-1" style={{ color: 'var(--color-text)' }}>Profit</div>
-                      <div className="text-lg font-bold" style={{ color: 'var(--color-accent)' }}>
+                    <div className='text-right'>
+                      <div
+                        className='text-xs opacity-60 mb-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Ganancia
+                      </div>
+                      <div
+                        className='text-lg font-bold'
+                        style={{ color: 'var(--color-primary)' }}
+                      >
                         {formatPrice(product.profit)}
                       </div>
                     </div>
@@ -378,33 +542,68 @@ export function MetricsView() {
           </div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>Productos Más Vendidos</h2>
-          <div className="space-y-4">
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <h2
+            className='text-xl font-bold mb-4'
+            style={{ color: 'var(--color-text)' }}
+          >
+            Productos Más Vendidos
+          </h2>
+          <div className='space-y-4'>
             {topProducts.length === 0 ? (
-              <div className="text-center text-gray-400 py-8">Aún no hay ventas de productos</div>
+              <div className='text-center text-gray-400 py-8'>
+                Aún no hay ventas de productos
+              </div>
             ) : (
               topProducts.map((product, index) => (
-                <div key={product.product_name} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
-                  <div className="flex items-center gap-3 mb-2">
+                <div
+                  key={product.product_name}
+                  className='p-4 rounded-lg'
+                  style={{ backgroundColor: 'var(--color-background-accent)' }}
+                >
+                  <div className='flex items-center gap-3 mb-2'>
                     <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
+                      className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
+                      style={{
+                        backgroundColor: 'var(--color-background-secondary)',
+                      }}
                     >
                       {index + 1}
                     </div>
-                    <div className="flex-1">
-                      <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{product.product_name}</div>
-                      <div className="text-sm opacity-60 mt-1" style={{ color: 'var(--color-text)' }}>
-                        {formatNumber(product.quantity)} unidades vendidas
+                    <div className='flex-1'>
+                      <div
+                        className='font-semibold'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {product.product_name}
                       </div>
-                      <div className="text-xs mt-1 opacity-60" style={{ color: 'var(--color-text)' }}>
-                        Revenue: {formatPrice(product.revenue)}
+                      <div
+                        className='text-sm opacity-60 mt-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {formatNumber(product.quantity)} unidad/es vendidas
+                      </div>
+                      <div
+                        className='text-xs mt-1 opacity-60'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Ingreso: {formatPrice(product.revenue)}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-xs opacity-60 mb-1" style={{ color: 'var(--color-text)' }}>Profit</div>
-                      <div className="text-lg font-bold" style={{ color: 'var(--color-primary)' }}>
+                    <div className='text-right'>
+                      <div
+                        className='text-xs opacity-60 mb-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Ganancia
+                      </div>
+                      <div
+                        className='text-lg font-bold'
+                        style={{ color: 'var(--color-primary)' }}
+                      >
                         {formatPrice(product.profit)}
                       </div>
                     </div>
@@ -415,45 +614,79 @@ export function MetricsView() {
           </div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6 flex flex-col" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>Productos Vendidos</h2>
-          <div className="space-y-4 overflow-y-auto scrollbar-hide" style={{ maxHeight: '500px' }}>
+        <div
+          className='rounded-lg shadow-md p-6 flex flex-col'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <h2
+            className='text-xl font-bold mb-4'
+            style={{ color: 'var(--color-text)' }}
+          >
+            Productos Vendidos
+          </h2>
+          <div
+            className='space-y-4 overflow-y-auto scrollbar-hide'
+            style={{ maxHeight: '500px' }}
+          >
             {allSoldProducts.length === 0 ? (
-              <div className="text-center text-gray-400 py-8">Aún no hay ventas de productos</div>
+              <div className='text-center text-gray-400 py-8'>
+                Aún no hay ventas de productos
+              </div>
             ) : (
               (() => {
-                const productsByCategory = allSoldProducts.reduce((acc, product) => {
-                  const productInfo = products.find(p => p.name === product.product_name);
-                  const category = productInfo?.category || 'N/A';
-                  if (!acc[category]) {
-                    acc[category] = [];
-                  }
-                  acc[category].push(product);
-                  return acc;
-                }, {} as Record<string, typeof topProducts>);
+                const productsByCategory = allSoldProducts.reduce(
+                  (acc, product) => {
+                    const productInfo = products.find(
+                      (p) => p.name === product.product_name
+                    );
+                    const category = productInfo?.category || 'N/A';
+                    if (!acc[category]) {
+                      acc[category] = [];
+                    }
+                    acc[category].push(product);
+                    return acc;
+                  },
+                  {} as Record<string, typeof topProducts>
+                );
 
                 const sortedCategories = Object.keys(productsByCategory).sort();
 
                 return sortedCategories.map((category) => (
-                  <div key={category} className="space-y-2">
-                    <div className="font-semibold text-sm uppercase tracking-wide opacity-60 px-2" style={{ color: 'var(--color-text)' }}>
+                  <div key={category} className='space-y-2'>
+                    <div
+                      className='font-semibold text-sm uppercase tracking-wide opacity-60 px-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
                       {category}
                     </div>
                     {productsByCategory[category].map((product) => (
                       <div
                         key={product.product_name}
-                        className="flex justify-between items-center p-3 rounded-lg"
-                        style={{ backgroundColor: 'var(--color-background-accent)' }}
+                        className='flex justify-between items-center p-3 rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                        }}
                       >
-                        <div className="flex-1">
-                          <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{product.product_name}</div>
+                        <div className='flex-1'>
+                          <div
+                            className='font-semibold'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            {product.product_name}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-lg font-bold" style={{ color: 'var(--color-primary)' }}>
+                        <div className='text-right'>
+                          <div
+                            className='text-lg font-bold'
+                            style={{ color: 'var(--color-primary)' }}
+                          >
                             {formatNumber(product.quantity)}
                           </div>
-                          <div className="text-xs opacity-60" style={{ color: 'var(--color-text)' }}>
-                            unidades
+                          <div
+                            className='text-xs opacity-60'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            unidad/es
                           </div>
                         </div>
                       </div>
@@ -465,39 +698,89 @@ export function MetricsView() {
           </div>
         </div>
 
-        <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-          <h2 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>Estado del Inventario</h2>
-          <div className="space-y-4">
-            {(categoryFilter === 'all' ? ['burgers', 'sides', 'drinks'] : [categoryFilter]).map((category) => {
-              const categoryProducts = products.filter((p) => p.category === category);
-              const totalStock = categoryProducts.reduce((sum, p) => sum + p.stock, 0);
-              const totalValue = categoryProducts.reduce((sum, p) => sum + p.price * p.stock, 0);
-              const totalCost = categoryProducts.reduce((sum, p) => sum + p.production_cost * p.stock, 0);
+        <div
+          className='rounded-lg shadow-md p-6'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <h2
+            className='text-xl font-bold mb-4'
+            style={{ color: 'var(--color-text)' }}
+          >
+            Estado del Inventario
+          </h2>
+          <div className='space-y-4'>
+            {(categoryFilter === 'all'
+              ? ['hamburguesas', 'papas fritas', 'bebidas']
+              : [categoryFilter]
+            ).map((category) => {
+              const categoryProducts = products.filter(
+                (p) => p.category === category
+              );
+              const totalStock = categoryProducts.reduce(
+                (sum, p) => sum + p.stock,
+                0
+              );
+              const totalValue = categoryProducts.reduce(
+                (sum, p) => sum + p.price * p.stock,
+                0
+              );
+              const totalCost = categoryProducts.reduce(
+                (sum, p) => sum + p.production_cost * p.stock,
+                0
+              );
               const potentialProfit = totalValue - totalCost;
 
               return (
-                <div key={category} className="p-4 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
-                  <div className="flex justify-between items-center mb-2">
-                    <div className="font-semibold capitalize dark:text-white">{category}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                <div
+                  key={category}
+                  className='p-4 rounded-lg'
+                  style={{ backgroundColor: 'var(--color-background-accent)' }}
+                >
+                  <div className='flex justify-between items-center mb-2'>
+                    <div className='font-semibold capitalize dark:text-white'>
+                      {category}
+                    </div>
+                    <div className='text-sm text-gray-500 dark:text-gray-400'>
                       {categoryProducts.length} productos
                     </div>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-300">Unidades Totales:</span>
-                    <span className="font-bold dark:text-white">{formatNumber(totalStock)}</span>
+                  <div className='flex justify-between text-sm'>
+                    <span className='text-gray-600 dark:text-gray-300'>
+                      Unidades Totales:
+                    </span>
+                    <span className='font-bold dark:text-white'>
+                      {formatNumber(totalStock)}
+                    </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-300">Costo Total:</span>
-                    <span className="font-bold dark:text-white">{formatPrice(totalCost)}</span>
+                  <div className='flex justify-between text-sm'>
+                    <span className='text-gray-600 dark:text-gray-300'>
+                      Costo Total:
+                    </span>
+                    <span className='font-bold dark:text-white'>
+                      {formatPrice(totalCost)}
+                    </span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-300">Valor de Venta:</span>
-                    <span className="font-bold dark:text-white">{formatPrice(totalValue)}</span>
+                  <div className='flex justify-between text-sm'>
+                    <span className='text-gray-600 dark:text-gray-300'>
+                      Valor de Venta:
+                    </span>
+                    <span className='font-bold dark:text-white'>
+                      {formatPrice(totalValue)}
+                    </span>
                   </div>
-                  <div className="flex justify-between text-sm mt-2 pt-2 border-t" style={{ borderColor: 'var(--color-primary)' }}>
-                    <span className="text-gray-600 dark:text-gray-300">Ganancia Potencial:</span>
-                    <span className="font-bold" style={{ color: 'var(--color-accent)' }}>{formatPrice(potentialProfit)}</span>
+                  <div
+                    className='flex justify-between text-sm mt-2 pt-2 border-t'
+                    style={{ borderColor: 'var(--color-primary)' }}
+                  >
+                    <span className='text-gray-600 dark:text-gray-300'>
+                      Ganancia Potencial:
+                    </span>
+                    <span
+                      className='font-bold'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {formatPrice(potentialProfit)}
+                    </span>
                   </div>
                 </div>
               );

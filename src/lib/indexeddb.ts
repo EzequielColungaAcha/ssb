@@ -1,5 +1,5 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export interface Product {
   id: string;
@@ -7,6 +7,7 @@ export interface Product {
   price: number;
   category: string;
   stock: number;
+  active: boolean;
   production_cost: number;
   created_at: string;
   updated_at: string;
@@ -77,30 +78,46 @@ class IndexedDBService {
         const db = (event.target as IDBOpenDBRequest).result;
 
         if (!db.objectStoreNames.contains('products')) {
-          const productStore = db.createObjectStore('products', { keyPath: 'id' });
+          const productStore = db.createObjectStore('products', {
+            keyPath: 'id',
+          });
           productStore.createIndex('category', 'category', { unique: false });
           productStore.createIndex('name', 'name', { unique: false });
         }
 
         if (!db.objectStoreNames.contains('sales')) {
           const salesStore = db.createObjectStore('sales', { keyPath: 'id' });
-          salesStore.createIndex('completed_at', 'completed_at', { unique: false });
-          salesStore.createIndex('sale_number', 'sale_number', { unique: true });
+          salesStore.createIndex('completed_at', 'completed_at', {
+            unique: false,
+          });
+          salesStore.createIndex('sale_number', 'sale_number', {
+            unique: true,
+          });
         }
 
         if (!db.objectStoreNames.contains('sale_items')) {
-          const saleItemsStore = db.createObjectStore('sale_items', { keyPath: 'id' });
+          const saleItemsStore = db.createObjectStore('sale_items', {
+            keyPath: 'id',
+          });
           saleItemsStore.createIndex('sale_id', 'sale_id', { unique: false });
         }
 
         if (!db.objectStoreNames.contains('cash_drawer')) {
-          const drawerStore = db.createObjectStore('cash_drawer', { keyPath: 'id' });
-          drawerStore.createIndex('denomination', 'denomination', { unique: true });
+          const drawerStore = db.createObjectStore('cash_drawer', {
+            keyPath: 'id',
+          });
+          drawerStore.createIndex('denomination', 'denomination', {
+            unique: true,
+          });
         }
 
         if (!db.objectStoreNames.contains('cash_movements')) {
-          const movementsStore = db.createObjectStore('cash_movements', { keyPath: 'id' });
-          movementsStore.createIndex('created_at', 'created_at', { unique: false });
+          const movementsStore = db.createObjectStore('cash_movements', {
+            keyPath: 'id',
+          });
+          movementsStore.createIndex('created_at', 'created_at', {
+            unique: false,
+          });
           movementsStore.createIndex('sale_id', 'sale_id', { unique: false });
         }
 
@@ -111,7 +128,10 @@ class IndexedDBService {
     });
   }
 
-  private getStore(storeName: string, mode: IDBTransactionMode = 'readonly'): IDBObjectStore {
+  private getStore(
+    storeName: string,
+    mode: IDBTransactionMode = 'readonly'
+  ): IDBObjectStore {
     if (!this.db) throw new Error('Database not initialized');
     const transaction = this.db.transaction(storeName, mode);
     return transaction.objectStore(storeName);
@@ -153,11 +173,16 @@ class IndexedDBService {
     });
   }
 
-  async getAllByIndex<T>(storeName: string, indexName: string, query?: IDBValidKey): Promise<T[]> {
+  async getAllByIndex<T>(
+    storeName: string,
+    indexName: string,
+    query?: IDBValidKey
+  ): Promise<T[]> {
     return new Promise((resolve, reject) => {
       const store = this.getStore(storeName);
       const index = store.index(indexName);
-      const request = query !== undefined ? index.getAll(query) : index.getAll();
+      const request =
+        query !== undefined ? index.getAll(query) : index.getAll();
       request.onsuccess = () => resolve(request.result as T[]);
       request.onerror = () => reject(request.error);
     });
