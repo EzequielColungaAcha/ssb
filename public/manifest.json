@@ -3,7 +3,7 @@
   "short_name": "POS",
   "description": "Offline-capable Point of Sale Application",
   "start_url": "/ssb/",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#ffffff",
   "theme_color": "#000000",
   "orientation": "landscape",
