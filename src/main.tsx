@@ -5,7 +5,7 @@ import './index.css';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then(
+    navigator.serviceWorker.register('/ssb/sw.js', { scope: '/ssb/' }).then(
       (registration) => {
         console.log('ServiceWorker registered:', registration.scope);
       },
