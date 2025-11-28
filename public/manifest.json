@@ -1,12 +1,12 @@
 {
-  "name": "POS Application",
+  "name": "SSB",
   "short_name": "POS",
   "description": "Offline-capable Point of Sale Application",
-  "start_url": "/",
+  "start_url": "/ssb/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#000000",
-  "orientation": "portrait-primary",
+  "orientation": "landscape",
   "icons": [
     {
       "src": "/icon-192.png",
