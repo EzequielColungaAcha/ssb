@@ -1,11 +1,11 @@
 const ROOT = '/ssb/';
 const CACHE_NAME = 'ssb-pos-app-v1';
 const urlsToCache = [
-  '/',
-  '/index.html',
-  '/src/main.tsx',
-  '/src/App.tsx',
-  '/src/index.css',
+  './',
+  './index.html',
+  './src/main.tsx',
+  './src/App.tsx',
+  './src/index.css',
 ];
 
 self.addEventListener('install', (event) => {
