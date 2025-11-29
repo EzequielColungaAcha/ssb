@@ -1,65 +1,78 @@
-const ROOT = '/ssb/';
-const CACHE_NAME = 'ssb-pos-app-v1';
-const urlsToCache = [
-  '/',
-  '/index.html',
-  '/sw.js',
-  '/manifest.json',
-  '/favicon.ico',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/assets/index-aq92reWh.js',
-  '/assets/index-GnMCRAsJ.css',
+const CACHE_NAME = 'ssb-pos-app-v2';
+const PRECACHE_URLS = [
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
 ];
 
+// Install: cache important files
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(urlsToCache);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS))
   );
   self.skipWaiting();
 });
 
+// Activate: clean old caches
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((cacheNames) =>
+        Promise.all(
+          cacheNames
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => caches.delete(name))
+        )
+      )
+  );
+  self.clients.claim();
+});
+
+// Fetch: cache-first strategy with runtime caching
 self.addEventListener('fetch', (event) => {
+  // Only handle GET requests
+  if (event.request.method !== 'GET') return;
+
+  const request = event.request;
+
+  // For navigations, try cache, then network, then offline fallback
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      caches.match('./index.html').then((cached) => {
+        return (
+          cached || fetch(request).catch(() => caches.match('./index.html'))
+        );
+      })
+    );
+    return;
+  }
+
+  // For other requests (JS, CSS, images…) → cache-first, then network
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      if (response) {
-        return response;
-      }
-      return fetch(event.request)
+    caches.match(request).then((cachedResponse) => {
+      if (cachedResponse) return cachedResponse;
+
+      return fetch(request)
         .then((response) => {
           if (
             !response ||
             response.status !== 200 ||
-            response.type === 'error'
+            response.type === 'opaque'
           ) {
             return response;
           }
+
           const responseToCache = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
+            cache.put(request, responseToCache);
           });
+
           return response;
         })
-        .catch(() => {
-          return caches.match('/index.html');
-        });
+        .catch(() => cachedResponse);
     })
   );
-});
-
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-  );
-  self.clients.claim();
 });
