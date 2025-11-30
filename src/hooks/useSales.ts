@@ -34,7 +34,14 @@ export function useSales() {
       const totalAmount = items.reduce((sum, item) => sum + item.product_price * item.quantity, 0);
       const changeGiven = cashReceived ? cashReceived - totalAmount : undefined;
 
-      const saleNumber = `S-${Date.now()}`;
+      const allSales = await db.getAll<Sale>('sales');
+      const lastSaleNumber = allSales.length > 0
+        ? Math.max(...allSales.map(s => {
+            const numStr = s.sale_number.replace(/^S-/, '');
+            return parseInt(numStr) || 0;
+          }))
+        : 0;
+      const saleNumber = String(lastSaleNumber + 1);
       const now = new Date().toISOString();
 
       const newSale: Sale = {

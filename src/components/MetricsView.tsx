@@ -51,15 +51,7 @@ export function MetricsView() {
 
   useEffect(() => {
     calculateMetrics();
-  }, [
-    sales,
-    categoryFilter,
-    productFilter,
-    dateFilter,
-    startDate,
-    endDate,
-    specificDate,
-  ]);
+  }, [sales, categoryFilter, productFilter, dateFilter, startDate, endDate, specificDate]);
 
   useEffect(() => {
     setProductFilter('all');
@@ -271,17 +263,13 @@ export function MetricsView() {
   const totalSales = filteredSalesState.length;
   const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
 
-  const productsWithoutRawMaterials = inventoryFilteredProducts.filter(
-    (p) => !p.uses_materia_prima
-  );
+  const productsWithoutRawMaterials = inventoryFilteredProducts.filter(p => !p.uses_materia_prima);
   const productsInventoryValue = productsWithoutRawMaterials.reduce(
     (sum, product) => sum + product.production_cost * product.stock,
     0
   );
 
-  const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<
-    any[]
-  >([]);
+  const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<any[]>([]);
 
   useEffect(() => {
     const loadLinks = async () => {
@@ -294,13 +282,13 @@ export function MetricsView() {
 
   const filteredRawMaterials = (() => {
     if (productFilter !== 'all') {
-      const selectedProduct = products.find((p) => p.id === productFilter);
+      const selectedProduct = products.find(p => p.id === productFilter);
       if (selectedProduct && selectedProduct.uses_materia_prima) {
         const links = productMateriaPrimaLinks.filter(
-          (link) => link.product_id === productFilter
+          link => link.product_id === productFilter
         );
-        const materiaPrimaIds = links.map((link) => link.materia_prima_id);
-        return materiaPrima.filter((mp) => materiaPrimaIds.includes(mp.id));
+        const materiaPrimaIds = links.map(link => link.materia_prima_id);
+        return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
       }
       return [];
     }
@@ -310,14 +298,14 @@ export function MetricsView() {
     }
 
     const categoryProducts = products.filter(
-      (p) => p.uses_materia_prima && p.category === categoryFilter
+      p => p.uses_materia_prima && p.category === categoryFilter
     );
-    const productIds = categoryProducts.map((p) => p.id);
-    const links = productMateriaPrimaLinks.filter((link) =>
-      productIds.includes(link.product_id)
+    const productIds = categoryProducts.map(p => p.id);
+    const links = productMateriaPrimaLinks.filter(
+      link => productIds.includes(link.product_id)
     );
-    const materiaPrimaIds = links.map((link) => link.materia_prima_id);
-    return materiaPrima.filter((mp) => materiaPrimaIds.includes(mp.id));
+    const materiaPrimaIds = links.map(link => link.materia_prima_id);
+    return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
   })();
 
   const rawMaterialsValue = filteredRawMaterials.reduce(
@@ -355,14 +343,13 @@ export function MetricsView() {
           className='text-3xl font-bold'
           style={{ color: 'var(--color-text)' }}
         >
-          Métricas y Análisis
+          Metrics & Analytics
         </h1>
         <p
           className='text-sm opacity-60 mt-1 mb-4'
           style={{ color: 'var(--color-text)' }}
         >
-          Analizá el rendimiento de tu negocio con métricas detalladas y
-          reportes visuales
+          Analizá el rendimiento de tu negocio con métricas detalladas y reportes visuales
         </p>
         <div className='flex flex-wrap items-center gap-3'>
           <div className='flex items-center gap-2'>
@@ -616,7 +603,7 @@ export function MetricsView() {
                     <div
                       className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
                       style={{
-                        backgroundColor: 'var(--color-primary)',
+                        backgroundColor: 'var(--color-background-secondary)',
                       }}
                     >
                       {index + 1}
@@ -650,7 +637,7 @@ export function MetricsView() {
                       </div>
                       <div
                         className='text-lg font-bold'
-                        style={{ color: 'var(--color-accent)' }}
+                        style={{ color: 'var(--color-primary)' }}
                       >
                         {formatPrice(product.profit)}
                       </div>
@@ -688,7 +675,7 @@ export function MetricsView() {
                     <div
                       className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
                       style={{
-                        backgroundColor: 'var(--color-primary)',
+                        backgroundColor: 'var(--color-background-secondary)',
                       }}
                     >
                       {index + 1}
@@ -722,7 +709,7 @@ export function MetricsView() {
                       </div>
                       <div
                         className='text-lg font-bold'
-                        style={{ color: 'var(--color-accent)' }}
+                        style={{ color: 'var(--color-primary)' }}
                       >
                         {formatPrice(product.profit)}
                       </div>
@@ -866,10 +853,8 @@ export function MetricsView() {
 
                     if (materiaPrimaProducts.length > 0) {
                       const avgPrice =
-                        materiaPrimaProducts.reduce(
-                          (sum, p) => sum + p.price,
-                          0
-                        ) / materiaPrimaProducts.length;
+                        materiaPrimaProducts.reduce((sum, p) => sum + p.price, 0) /
+                        materiaPrimaProducts.length;
                       const avgCost =
                         materiaPrimaProducts.reduce(
                           (sum, p) => sum + p.production_cost,
@@ -901,9 +886,7 @@ export function MetricsView() {
                 return (
                   <div
                     className='p-4 rounded-lg'
-                    style={{
-                      backgroundColor: 'var(--color-background-accent)',
-                    }}
+                    style={{ backgroundColor: 'var(--color-background-accent)' }}
                   >
                     <div className='flex justify-between items-center mb-2'>
                       <div className='font-semibold capitalize dark:text-white'>

@@ -120,7 +120,7 @@ export function SalesView() {
                         #{sales.length - index}
                       </div>
                       <div className='font-mono font-semibold'>
-                        {sale.sale_number}
+                        {parseInt(sale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
                       </div>
                     </div>
                     <div className='text-lg font-bold'>
@@ -163,7 +163,7 @@ export function SalesView() {
               >
                 <div className='text-sm opacity-90 mb-1'>Número de Venta</div>
                 <div className='text-2xl font-bold mb-3'>
-                  {selectedSale.sale_number}
+                  {parseInt(selectedSale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
                 </div>
                 <div className='grid grid-cols-2 gap-4 text-sm'>
                   <div>

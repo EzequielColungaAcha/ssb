@@ -138,6 +138,21 @@ export function useCashDrawer() {
     }
   };
 
+  const updateBillQuantityOnly = async (denomination: number, quantity: number) => {
+    await ensureBillExists(denomination);
+    await db.init();
+    const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', denomination);
+    if (existing.length > 0) {
+      const bill = existing[0];
+      const updated: CashDrawer = {
+        ...bill,
+        quantity,
+        updated_at: new Date().toISOString(),
+      };
+      await db.put('cash_drawer', updated);
+    }
+  };
+
   const addBills = async (denomination: number, quantity: number, saleId?: string) => {
     await ensureBillExists(denomination);
     const bill = bills.find((b) => b.denomination === denomination);
@@ -199,30 +214,53 @@ export function useCashDrawer() {
 
   const processChange = async (changeBreakdown: ChangeBreakdown[], saleId: string) => {
     try {
-      for (const item of changeBreakdown) {
-        await removeBills(item.bill_value, item.quantity, saleId);
+      if (!changeBreakdown || changeBreakdown.length === 0) {
+        return;
       }
+
+      for (const item of changeBreakdown) {
+        const bill = bills.find((b) => b.denomination === item.bill_value);
+        if (bill && bill.quantity >= item.quantity) {
+          await updateBillQuantityOnly(item.bill_value, bill.quantity - item.quantity);
+        }
+      }
+
+      const billsOutRecord: Record<string, number> = {};
+      changeBreakdown.forEach((item) => {
+        billsOutRecord[item.bill_value.toString()] = item.quantity;
+      });
+
+      await logMovement('change_given', undefined, billsOutRecord, saleId);
+      await loadBills();
     } catch (error) {
       console.error('Error processing change:', error);
       throw error;
     }
   };
 
-  const processCashReceived = async (cashReceived: number, saleId: string) => {
+  const processCashReceived = async (billHistory: number[], saleId: string) => {
     try {
       const billCounts: { [key: number]: number } = {};
 
-      [20000, 10000, 2000, 1000, 500, 200, 100, 50, 20, 10].forEach((value) => {
-        const count = Math.floor(cashReceived / value);
-        if (count > 0) {
-          billCounts[value] = count;
-          cashReceived -= count * value;
-        }
+      billHistory.forEach((billValue) => {
+        billCounts[billValue] = (billCounts[billValue] || 0) + 1;
       });
 
       for (const [value, count] of Object.entries(billCounts)) {
-        await addBills(parseInt(value), count, saleId);
+        const denomination = parseInt(value);
+        const bill = bills.find((b) => b.denomination === denomination);
+        if (bill) {
+          await updateBillQuantityOnly(denomination, bill.quantity + count);
+        }
       }
+
+      const billsInRecord: Record<string, number> = {};
+      Object.entries(billCounts).forEach(([value, count]) => {
+        billsInRecord[value] = count;
+      });
+
+      await logMovement('sale', billsInRecord, undefined, saleId);
+      await loadBills();
 
       return billCounts;
     } catch (error) {

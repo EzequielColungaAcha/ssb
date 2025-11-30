@@ -6,6 +6,7 @@ import { useSales } from '../hooks/useSales';
 import { CashMovement, Sale, SaleItem } from '../lib/indexeddb';
 import { translations as t } from '../lib/translations';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { Button } from './ui/button';
 
 export function CashDrawerView() {
   const { bills, updateBillQuantity, getTotalCash, getCashMovements, resetCashDrawer, loading } = useCashDrawer();
@@ -18,6 +19,8 @@ export function CashDrawerView() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
   const [showSaleModal, setShowSaleModal] = useState(false);
+  const [filterMovementType, setFilterMovementType] = useState<string>('all');
+  const [filterBillDenomination, setFilterBillDenomination] = useState<string>('all');
 
   useEffect(() => {
     if (showMovements) {
@@ -98,6 +101,22 @@ export function CashDrawerView() {
     }
   };
 
+  const filteredMovements = movements.filter((movement) => {
+    if (filterMovementType !== 'all' && movement.movement_type !== filterMovementType) {
+      return false;
+    }
+
+    if (filterBillDenomination !== 'all') {
+      const hasBillIn = movement.bills_in && Object.keys(movement.bills_in).includes(filterBillDenomination);
+      const hasBillOut = movement.bills_out && Object.keys(movement.bills_out).includes(filterBillDenomination);
+      if (!hasBillIn && !hasBillOut) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
   const handleResetCashDrawer = () => {
     const totalCash = getTotalCash();
 
@@ -173,14 +192,15 @@ export function CashDrawerView() {
           </div>
           <Wallet size={64} className="text-gray-300 dark:text-gray-600" />
         </div>
-        <button
+        <Button
           onClick={handleResetCashDrawer}
           disabled={totalCash === 0}
           className="w-full py-2 px-4 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-semibold transition-colors"
+          variant="secondary"
         >
           <DoorClosed size={18} />
           Cierre de Caja
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -291,8 +311,50 @@ export function CashDrawerView() {
             ) : movements.length === 0 ? (
               <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t.cashDrawer.noMovements}</div>
             ) : (
-              <div className="space-y-3 max-h-96 overflow-auto scrollbar-hide">
-                {movements.map((movement) => (
+              <>
+                <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-2 dark:text-white">
+                      Filtrar por Tipo
+                    </label>
+                    <select
+                      value={filterMovementType}
+                      onChange={(e) => setFilterMovementType(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="sale">Venta</option>
+                      <option value="change_given">Cambio Dado</option>
+                      <option value="cash_closing">Cierre de Caja</option>
+                      <option value="manual_add">Agregado Manual</option>
+                      <option value="manual_remove">Retiro Manual</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2 dark:text-white">
+                      Filtrar por Billete
+                    </label>
+                    <select
+                      value={filterBillDenomination}
+                      onChange={(e) => setFilterBillDenomination(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                    >
+                      <option value="all">Todos</option>
+                      {bills.map((bill) => (
+                        <option key={bill.denomination} value={bill.denomination.toString()}>
+                          {formatPrice(bill.denomination)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {filteredMovements.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    No hay movimientos que coincidan con los filtros
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-96 overflow-auto scrollbar-hide">
+                    {filteredMovements.map((movement) => (
                   <div
                     key={movement.id}
                     className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700"
@@ -306,23 +368,41 @@ export function CashDrawerView() {
                           {movement.sale_id && (
                             <button
                               onClick={() => handleViewSale(movement.sale_id!)}
-                              className="text-xs px-2 -py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer"
+                              className="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer"
                             >
-                              Venta #{movement.sale_id.slice(0, 8)}
+                              ID: {movement.sale_id.slice(0, 8)}
                             </button>
                           )}
                         </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-300 space-y-1">
-                          {movement.bills_in && Object.entries(movement.bills_in).map(([denom, qty]) => (
-                            <div key={denom} className="text-green-600 dark:text-green-400">
-                              +{qty}x ${denom}
+                        <div className="text-sm text-gray-600 dark:text-gray-300">
+                          {movement.bills_in && Object.keys(movement.bills_in).length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {Object.entries(movement.bills_in)
+                                .sort(([a], [b]) => Number(b) - Number(a))
+                                .map(([denom, qty]) => (
+                                  <span
+                                    key={denom}
+                                    className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded"
+                                  >
+                                    {formatNumber(qty)}x {formatPrice(Number(denom))}
+                                  </span>
+                                ))}
                             </div>
-                          ))}
-                          {movement.bills_out && Object.entries(movement.bills_out).map(([denom, qty]) => (
-                            <div key={denom} className="text-red-600 dark:text-red-400">
-                              -{qty}x ${denom}
+                          )}
+                          {movement.bills_out && Object.keys(movement.bills_out).length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {Object.entries(movement.bills_out)
+                                .sort(([a], [b]) => Number(b) - Number(a))
+                                .map(([denom, qty]) => (
+                                  <span
+                                    key={denom}
+                                    className="text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded"
+                                  >
+                                    {formatNumber(qty)}x {formatPrice(Number(denom))}
+                                  </span>
+                                ))}
                             </div>
-                          ))}
+                          )}
                         </div>
                         {movement.notes && (
                           <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -337,6 +417,8 @@ export function CashDrawerView() {
                   </div>
                 ))}
               </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -354,7 +436,7 @@ export function CashDrawerView() {
               </h2>
               <button
                 onClick={() => setShowSaleModal(false)}
-                className="items-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className="flex justify-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
               >
                 <X size={24} style={{ color: 'var(--color-text)' }} />
               </button>
@@ -370,7 +452,7 @@ export function CashDrawerView() {
               >
                 <div className="text-sm opacity-90 mb-1">Número de Venta</div>
                 <div className="text-2xl font-bold mb-3">
-                  {selectedSale.sale_number}
+                  {parseInt(selectedSale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>

@@ -30,7 +30,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Product, db, AppSettings } from '../lib/indexeddb';
+import { Product, db, AppSettings, Sale } from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
@@ -164,6 +164,7 @@ export function POSView() {
   const [isLayoutLocked, setIsLayoutLocked] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
+  const [nextSaleNumber, setNextSaleNumber] = useState<string>('');
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -220,6 +221,28 @@ export function POSView() {
     });
     setSortedProducts(sorted);
   }, [products]);
+
+  useEffect(() => {
+    const loadNextSaleNumber = async () => {
+      try {
+        await db.init();
+        const allSales = await db.getAll<Sale>('sales');
+        const lastSaleNumber = allSales.length > 0
+          ? Math.max(...allSales.map(s => {
+              const numStr = s.sale_number.replace(/^S-/, '');
+              return parseInt(numStr) || 0;
+            }))
+          : 0;
+        const nextNumber = lastSaleNumber + 1;
+        const formatted = nextNumber.toLocaleString('es-CL');
+        setNextSaleNumber(formatted);
+      } catch (error) {
+        console.error('Error loading next sale number:', error);
+      }
+    };
+
+    loadNextSaleNumber();
+  }, [cart]);
 
   const loadSettings = async () => {
     try {
@@ -398,25 +421,20 @@ export function POSView() {
         quantity: item.quantity,
       }));
 
-      let billsReceivedData: Record<number, number> | undefined;
       let billsChangeData: Record<number, number> | undefined;
 
-      if (paymentMethod === 'cash') {
-        billsReceivedData = await processCashReceived(cashReceived, '');
-
-        if (changeBreakdown) {
-          billsChangeData = {};
-          changeBreakdown.forEach((b) => {
-            billsChangeData![b.bill_value] = b.quantity;
-          });
-        }
+      if (paymentMethod === 'cash' && changeBreakdown) {
+        billsChangeData = {};
+        changeBreakdown.forEach((b) => {
+          billsChangeData![b.bill_value] = b.quantity;
+        });
       }
 
       const saleData = await createSale(
         items,
         paymentMethod,
         paymentMethod === 'cash' ? cashReceived : undefined,
-        billsReceivedData,
+        undefined,
         billsChangeData
       );
 
@@ -426,8 +444,19 @@ export function POSView() {
         }
       }
 
-      if (paymentMethod === 'cash' && saleData && changeBreakdown) {
-        await processChange(changeBreakdown, saleData.id);
+      if (paymentMethod === 'cash' && saleData) {
+        const billsReceivedData = await processCashReceived(billHistory, saleData.id);
+
+        if (changeBreakdown && changeBreakdown.length > 0) {
+          await processChange(changeBreakdown, saleData.id);
+        }
+
+        const updatedSale = {
+          ...saleData,
+          bills_received: billsReceivedData,
+        };
+        await db.init();
+        await db.put('sales', updatedSale);
       }
 
       await refreshProducts();
@@ -604,7 +633,10 @@ export function POSView() {
           className='w-96 shadow-xl p-6 flex flex-col'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-        <div className='flex items-center justify-end mb-6'>
+        <div className='flex items-center justify-between mb-6'>
+          <div className='text-sm font-semibold' style={{ color: 'var(--color-text)' }}>
+            Venta #{nextSaleNumber}
+          </div>
           {cart.length > 0 && (
             <button
               onClick={() => {

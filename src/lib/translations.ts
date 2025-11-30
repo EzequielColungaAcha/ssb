@@ -1,8 +1,8 @@
 export const translations = {
   nav: {
-    pos: 'Punto de Venta',
+    pos: 'PDV',
     products: 'Productos',
-    sales: 'Historial',
+    sales: 'Ventas',
     metrics: 'Métricas',
     cashDrawer: 'Caja',
     settings: 'Configuración',
@@ -21,8 +21,7 @@ export const translations = {
     cashReceived: 'Efectivo recibido:',
     change: 'Cambio:',
     giveChange: 'Dar cambio:',
-    cannotMakeChange:
-      'No se puede dar cambio exacto con los billetes disponibles',
+    cannotMakeChange: 'No se puede dar cambio exacto con los billetes disponibles',
     onlinePayment: 'Pago Online',
     customerWillPayElectronically: 'El cliente pagará electrónicamente',
     completeSale: 'Completar Venta',
@@ -115,13 +114,11 @@ export const translations = {
     add: 'Agregar',
     save: 'Guardar',
     automaticUpdates: 'Actualizaciones Automáticas',
-    automaticUpdatesDesc:
-      'La caja se actualiza automáticamente cuando completás ventas. El efectivo recibido se agrega a la caja, y el cambio dado se resta. Ajustá las cantidades manualmente acá si es necesario para depósitos o retiros de efectivo.',
+    automaticUpdatesDesc: 'La caja se actualiza automáticamente cuando completás ventas. El efectivo recibido se agrega a la caja, y el cambio dado se resta. Ajustá las cantidades manualmente acá si es necesario para depósitos o retiros de efectivo.',
     errorUpdating: 'Error al actualizar la cantidad de billetes',
     loading: 'Cargando...',
     movementsLog: 'Historial de Movimientos',
-    movementsLogDesc:
-      'Registro de todos los movimientos de efectivo en la caja',
+    movementsLogDesc: 'Registro de todos los movimientos de efectivo en la caja',
     showMovements: 'Mostrar Historial',
     hideMovements: 'Ocultar Historial',
     noMovements: 'No hay movimientos registrados',
@@ -157,8 +154,7 @@ export const translations = {
     successSaving: '¡Configuración guardada exitosamente!',
     errorSaving: 'Error al guardar la configuración',
     logoSettings: 'Configuración de Logo',
-    logoSettingsDesc:
-      'Personalizá el logo o siglas que aparecen cuando la barra lateral está contraída',
+    logoSettingsDesc: 'Personalizá el logo o siglas que aparecen cuando la barra lateral está contraída',
     acronym: 'Siglas',
     acronymPlaceholder: 'Ej: SSB',
   },
