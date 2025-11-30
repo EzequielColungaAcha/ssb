@@ -127,6 +127,7 @@ export const translations = {
     movementManualAdd: 'Agregado Manual',
     movementManualRemove: 'Retiro Manual',
     movementChangeGiven: 'Cambio Dado',
+    movementCashClosing: 'Cierre de Caja',
     billsIn: 'Billetes Recibidos',
     billsOut: 'Billetes Dados',
   },

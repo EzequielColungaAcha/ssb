@@ -9,6 +9,8 @@
   --color-background: #f9fafb;
   --color-background-secondary: #ffffff;
   --color-background-accent: #f3f4f6;
+  --min-touch-target: 48px;
+  --tablet-spacing: 16px;
 }
 
 * {
@@ -25,6 +27,8 @@ body {
   -moz-osx-font-smoothing: grayscale;
   color: var(--color-text);
   background-color: var(--color-background);
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 #root {
@@ -40,4 +44,33 @@ body {
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+@media (max-width: 1280px) and (orientation: landscape) {
+  :root {
+    font-size: 15px;
+  }
+
+  body {
+    font-size: 15px;
+  }
+}
+
+button, a, [role="button"] {
+  min-height: var(--min-touch-target);
+  min-width: var(--min-touch-target);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input, textarea, select {
+  min-height: var(--min-touch-target);
+  font-size: 16px;
+  touch-action: manipulation;
+}
+
+@supports (hover: hover) and (pointer: fine) {
+  button:hover, a:hover, [role="button"]:hover {
+    transition: all 0.2s ease;
+  }
 }

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
+import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { db, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
@@ -29,6 +30,7 @@ interface ProductSales {
 export function MetricsView() {
   const { sales } = useSales();
   const { products } = useProducts();
+  const { materiaPrima, calculateAvailableStock } = useMateriaPrima();
   const [dailySales, setDailySales] = useState<DailySales[]>([]);
   const [topProducts, setTopProducts] = useState<ProductSales[]>([]);
   const [allSoldProducts, setAllSoldProducts] = useState<ProductSales[]>([]);
@@ -36,7 +38,9 @@ export function MetricsView() {
     ProductSales[]
   >([]);
   const [totalProfit, setTotalProfit] = useState(0);
+  const [filteredRevenue, setFilteredRevenue] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [productFilter, setProductFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<string>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
@@ -47,7 +51,11 @@ export function MetricsView() {
 
   useEffect(() => {
     calculateMetrics();
-  }, [sales, categoryFilter, dateFilter, startDate, endDate, specificDate]);
+  }, [sales, categoryFilter, productFilter, dateFilter, startDate, endDate, specificDate]);
+
+  useEffect(() => {
+    setProductFilter('all');
+  }, [categoryFilter]);
 
   const filterSalesByDate = (salesToFilter: typeof sales) => {
     if (dateFilter === 'all') return salesToFilter;
@@ -127,19 +135,29 @@ export function MetricsView() {
     });
   };
 
+  const [filteredSaleItems, setFilteredSaleItems] = useState<SaleItem[]>([]);
+
   const calculateMetrics = async () => {
     await db.init();
     const allSaleItems = await db.getAll<SaleItem>('sale_items');
 
     const dateFilteredSales = filterSalesByDate(sales);
 
-    const filteredSaleItems =
-      categoryFilter === 'all'
-        ? allSaleItems
-        : allSaleItems.filter((item) => {
-            const product = products.find((p) => p.id === item.product_id);
-            return product?.category === categoryFilter;
-          });
+    let filteredSaleItems = allSaleItems;
+
+    if (categoryFilter !== 'all') {
+      filteredSaleItems = filteredSaleItems.filter((item) => {
+        const product = products.find((p) => p.id === item.product_id);
+        return product?.category === categoryFilter;
+      });
+    }
+
+    if (productFilter !== 'all') {
+      filteredSaleItems = filteredSaleItems.filter((item) => {
+        const product = products.find((p) => p.id === item.product_id);
+        return product?.id === productFilter;
+      });
+    }
 
     const relevantSaleIds = new Set(
       filteredSaleItems.map((item) => item.sale_id)
@@ -177,10 +195,13 @@ export function MetricsView() {
       filteredSaleIds.has(item.sale_id)
     );
 
+    setFilteredSaleItems(dateAndCategoryFilteredItems);
+
     const productSales: {
       [key: string]: { quantity: number; revenue: number; profit: number };
     } = {};
     let profit = 0;
+    let revenue = 0;
 
     dateAndCategoryFilteredItems.forEach((item: SaleItem) => {
       if (!productSales[item.product_name]) {
@@ -196,9 +217,11 @@ export function MetricsView() {
       productSales[item.product_name].revenue += item.subtotal;
       productSales[item.product_name].profit += itemProfit;
       profit += itemProfit;
+      revenue += item.subtotal;
     });
 
     setTotalProfit(profit);
+    setFilteredRevenue(revenue);
 
     const allSoldProductsData = Object.entries(productSales)
       .map(([name, data]) => ({
@@ -231,16 +254,66 @@ export function MetricsView() {
       ? products
       : products.filter((p) => p.category === categoryFilter);
 
-  const totalRevenue = filteredSalesState.reduce(
-    (sum, sale) => sum + sale.total_amount,
-    0
-  );
+  const inventoryFilteredProducts =
+    productFilter === 'all'
+      ? filteredProducts
+      : filteredProducts.filter((p) => p.id === productFilter);
+
+  const totalRevenue = filteredRevenue;
   const totalSales = filteredSalesState.length;
   const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
-  const totalInventoryValue = filteredProducts.reduce(
-    (sum, product) => sum + product.price * product.stock,
+
+  const productsWithoutRawMaterials = inventoryFilteredProducts.filter(p => !p.uses_materia_prima);
+  const productsInventoryValue = productsWithoutRawMaterials.reduce(
+    (sum, product) => sum + product.production_cost * product.stock,
     0
   );
+
+  const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadLinks = async () => {
+      await db.init();
+      const links = await db.getAll('product_materia_prima');
+      setProductMateriaPrimaLinks(links);
+    };
+    loadLinks();
+  }, []);
+
+  const filteredRawMaterials = (() => {
+    if (productFilter !== 'all') {
+      const selectedProduct = products.find(p => p.id === productFilter);
+      if (selectedProduct && selectedProduct.uses_materia_prima) {
+        const links = productMateriaPrimaLinks.filter(
+          link => link.product_id === productFilter
+        );
+        const materiaPrimaIds = links.map(link => link.materia_prima_id);
+        return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
+      }
+      return [];
+    }
+
+    if (categoryFilter === 'all') {
+      return materiaPrima;
+    }
+
+    const categoryProducts = products.filter(
+      p => p.uses_materia_prima && p.category === categoryFilter
+    );
+    const productIds = categoryProducts.map(p => p.id);
+    const links = productMateriaPrimaLinks.filter(
+      link => productIds.includes(link.product_id)
+    );
+    const materiaPrimaIds = links.map(link => link.materia_prima_id);
+    return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
+  })();
+
+  const rawMaterialsValue = filteredRawMaterials.reduce(
+    (sum, mp) => sum + mp.cost_per_unit * mp.stock,
+    0
+  );
+
+  const totalInventoryValue = productsInventoryValue + rawMaterialsValue;
 
   // const maxDailySale = Math.max(...dailySales.map((d) => d.total), 1);
 
@@ -267,11 +340,17 @@ export function MetricsView() {
     <div className='p-6'>
       <div className='mb-6'>
         <h1
-          className='text-3xl font-bold mb-4'
+          className='text-3xl font-bold'
           style={{ color: 'var(--color-text)' }}
         >
           Metrics & Analytics
         </h1>
+        <p
+          className='text-sm opacity-60 mt-1 mb-4'
+          style={{ color: 'var(--color-text)' }}
+        >
+          Analizá el rendimiento de tu negocio con métricas detalladas y reportes visuales
+        </p>
         <div className='flex flex-wrap items-center gap-3'>
           <div className='flex items-center gap-2'>
             <Filter size={20} style={{ color: 'var(--color-text)' }} />
@@ -298,6 +377,34 @@ export function MetricsView() {
               ))}
             </select>
           </div>
+
+          {categoryFilter !== 'all' && (
+            <div className='flex items-center gap-2'>
+              <span
+                className='text-sm opacity-60'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Product:
+              </span>
+              <select
+                value={productFilter}
+                onChange={(e) => setProductFilter(e.target.value)}
+                className='px-4 py-2 rounded-lg border font-semibold'
+                style={{
+                  backgroundColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                  borderColor: 'var(--color-primary)',
+                }}
+              >
+                <option value='all'>All Products</option>
+                {filteredProducts.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className='flex items-center gap-2'>
             <span
@@ -466,7 +573,7 @@ export function MetricsView() {
       </div>
 
       <div className='mb-6'>
-        <SalesChart sales={filteredSalesState} />
+        <SalesChart sales={filteredSalesState} saleItems={filteredSaleItems} />
       </div>
 
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
@@ -713,77 +820,125 @@ export function MetricsView() {
               ? ['hamburguesas', 'papas fritas', 'bebidas']
               : [categoryFilter]
             ).map((category) => {
-              const categoryProducts = products.filter(
-                (p) => p.category === category
-              );
-              const totalStock = categoryProducts.reduce(
-                (sum, p) => sum + p.stock,
-                0
-              );
-              const totalValue = categoryProducts.reduce(
-                (sum, p) => sum + p.price * p.stock,
-                0
-              );
-              const totalCost = categoryProducts.reduce(
-                (sum, p) => sum + p.production_cost * p.stock,
-                0
-              );
-              const potentialProfit = totalValue - totalCost;
+              const InventoryStats = () => {
+                const [stats, setStats] = React.useState({
+                  totalStock: 0,
+                  totalValue: 0,
+                  totalCost: 0,
+                  productCount: 0,
+                });
 
-              return (
-                <div
-                  key={category}
-                  className='p-4 rounded-lg'
-                  style={{ backgroundColor: 'var(--color-background-accent)' }}
-                >
-                  <div className='flex justify-between items-center mb-2'>
-                    <div className='font-semibold capitalize dark:text-white'>
-                      {category}
-                    </div>
-                    <div className='text-sm text-gray-500 dark:text-gray-400'>
-                      {categoryProducts.length} productos
-                    </div>
-                  </div>
-                  <div className='flex justify-between text-sm'>
-                    <span className='text-gray-600 dark:text-gray-300'>
-                      Unidades Totales:
-                    </span>
-                    <span className='font-bold dark:text-white'>
-                      {formatNumber(totalStock)}
-                    </span>
-                  </div>
-                  <div className='flex justify-between text-sm'>
-                    <span className='text-gray-600 dark:text-gray-300'>
-                      Costo Total:
-                    </span>
-                    <span className='font-bold dark:text-white'>
-                      {formatPrice(totalCost)}
-                    </span>
-                  </div>
-                  <div className='flex justify-between text-sm'>
-                    <span className='text-gray-600 dark:text-gray-300'>
-                      Valor de Venta:
-                    </span>
-                    <span className='font-bold dark:text-white'>
-                      {formatPrice(totalValue)}
-                    </span>
-                  </div>
+                React.useEffect(() => {
+                  const calculateStats = async () => {
+                    const categoryProducts = products.filter(
+                      (p) => p.category === category
+                    );
+
+                    const regularProducts = categoryProducts.filter(
+                      (p) => !p.uses_materia_prima
+                    );
+                    const materiaPrimaProducts = categoryProducts.filter(
+                      (p) => p.uses_materia_prima
+                    );
+
+                    let totalStock = 0;
+                    let totalValue = 0;
+                    let totalCost = 0;
+
+                    for (const product of regularProducts) {
+                      totalStock += product.stock;
+                      totalValue += product.price * product.stock;
+                      totalCost += product.production_cost * product.stock;
+                    }
+
+                    if (materiaPrimaProducts.length > 0) {
+                      const avgPrice =
+                        materiaPrimaProducts.reduce((sum, p) => sum + p.price, 0) /
+                        materiaPrimaProducts.length;
+                      const avgCost =
+                        materiaPrimaProducts.reduce(
+                          (sum, p) => sum + p.production_cost,
+                          0
+                        ) / materiaPrimaProducts.length;
+
+                      const materiaPrimaStock = await calculateAvailableStock(
+                        materiaPrimaProducts[0].id
+                      );
+
+                      totalStock += materiaPrimaStock;
+                      totalValue += avgPrice * materiaPrimaStock;
+                      totalCost += avgCost * materiaPrimaStock;
+                    }
+
+                    setStats({
+                      totalStock,
+                      totalValue,
+                      totalCost,
+                      productCount: categoryProducts.length,
+                    });
+                  };
+
+                  calculateStats();
+                }, []);
+
+                const potentialProfit = stats.totalValue - stats.totalCost;
+
+                return (
                   <div
-                    className='flex justify-between text-sm mt-2 pt-2 border-t'
-                    style={{ borderColor: 'var(--color-primary)' }}
+                    className='p-4 rounded-lg'
+                    style={{ backgroundColor: 'var(--color-background-accent)' }}
                   >
-                    <span className='text-gray-600 dark:text-gray-300'>
-                      Ganancia Potencial:
-                    </span>
-                    <span
-                      className='font-bold'
-                      style={{ color: 'var(--color-accent)' }}
+                    <div className='flex justify-between items-center mb-2'>
+                      <div className='font-semibold capitalize dark:text-white'>
+                        {category}
+                      </div>
+                      <div className='text-sm text-gray-500 dark:text-gray-400'>
+                        {stats.productCount} productos
+                      </div>
+                    </div>
+                    <div className='flex justify-between text-sm'>
+                      <span className='text-gray-600 dark:text-gray-300'>
+                        Unidades Totales:
+                      </span>
+                      <span className='font-bold dark:text-white'>
+                        {formatNumber(stats.totalStock)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between text-sm'>
+                      <span className='text-gray-600 dark:text-gray-300'>
+                        Costo Total:
+                      </span>
+                      <span className='font-bold dark:text-white'>
+                        {formatPrice(stats.totalCost)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between text-sm'>
+                      <span className='text-gray-600 dark:text-gray-300'>
+                        Valor de Venta:
+                      </span>
+                      <span className='font-bold dark:text-white'>
+                        {formatPrice(stats.totalValue)}
+                      </span>
+                    </div>
+                    <div
+                      className='flex justify-between text-sm mt-2 pt-2 border-t'
+                      style={{ borderColor: 'var(--color-primary)' }}
                     >
-                      {formatPrice(potentialProfit)}
-                    </span>
+                      <span className='text-gray-600 dark:text-gray-300'>
+                        Ganancia Potencial:
+                      </span>
+                      <span
+                        className='font-bold'
+                        style={{ color: 'var(--color-accent)' }}
+                      >
+                        {formatPrice(potentialProfit)}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              };
+
+              return <InventoryStats key={category} />;
             })}
           </div>
         </div>

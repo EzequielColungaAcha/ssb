@@ -37,6 +37,7 @@ export function useProducts() {
       };
       await db.add('products', newProduct);
       await loadProducts();
+      return newProduct.id;
     } catch (error) {
       console.error('Error adding product:', error);
       throw error;

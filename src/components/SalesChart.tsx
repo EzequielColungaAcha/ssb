@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Sale } from '../lib/indexeddb';
+import { Sale, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from './ui/chart';
 
 type TimeFrame = 'hour' | 'day' | 'week' | 'month' | 'year';
+type ChartMode = 'sales' | 'products';
 
 interface ChartDataPoint {
   label: string;
@@ -12,16 +19,17 @@ interface ChartDataPoint {
 
 interface SalesChartProps {
   sales: Sale[];
+  saleItems: SaleItem[];
 }
 
-export function SalesChart({ sales }: SalesChartProps) {
+export function SalesChart({ sales, saleItems }: SalesChartProps) {
   const [timeFrame, setTimeFrame] = useState<TimeFrame>('day');
+  const [chartMode, setChartMode] = useState<ChartMode>('sales');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
 
   useEffect(() => {
     calculateChartData();
-  }, [sales, timeFrame]);
+  }, [sales, saleItems, timeFrame, chartMode]);
 
   const calculateChartData = () => {
     if (sales.length === 0) {
@@ -30,87 +38,109 @@ export function SalesChart({ sales }: SalesChartProps) {
     }
 
     const now = new Date();
-    const data: { [key: string]: { value: number; count: number } } = {};
+    const groupedData: { [key: string]: { value: number; count: number; minDate: Date } } = {};
 
-    sales.forEach((sale) => {
-      const saleDate = new Date(sale.completed_at);
-      let key: string;
+    if (chartMode === 'sales') {
+      sales.forEach((sale) => {
+        const saleDate = new Date(sale.completed_at);
+        const keyResult = getTimeKey(saleDate, now);
+        if (!keyResult) return;
 
-      switch (timeFrame) {
-        case 'hour':
-          // Last 24 hours
-          const hoursDiff = Math.floor((now.getTime() - saleDate.getTime()) / (1000 * 60 * 60));
-          if (hoursDiff < 24) {
-            key = `${saleDate.getHours()}:00`;
-          } else {
-            return;
-          }
-          break;
+        const { key, sortDate } = keyResult;
 
-        case 'day':
-          // Last 30 days
-          const daysDiff = Math.floor((now.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24));
-          if (daysDiff < 30) {
-            key = saleDate.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' });
-          } else {
-            return;
-          }
-          break;
-
-        case 'week':
-          // Last 12 weeks
-          const weeksDiff = Math.floor((now.getTime() - saleDate.getTime()) / (1000 * 60 * 60 * 24 * 7));
-          if (weeksDiff < 12) {
-            const weekStart = new Date(saleDate);
-            weekStart.setDate(saleDate.getDate() - saleDate.getDay());
-            key = `Sem ${weekStart.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' })}`;
-          } else {
-            return;
-          }
-          break;
-
-        case 'month':
-          // Last 12 months
-          const monthsDiff = (now.getFullYear() - saleDate.getFullYear()) * 12 + (now.getMonth() - saleDate.getMonth());
-          if (monthsDiff < 12) {
-            key = saleDate.toLocaleDateString('es-AR', { year: 'numeric', month: 'short' });
-          } else {
-            return;
-          }
-          break;
-
-        case 'year':
-          // Last 5 years
-          const yearsDiff = now.getFullYear() - saleDate.getFullYear();
-          if (yearsDiff < 5) {
-            key = saleDate.getFullYear().toString();
-          } else {
-            return;
-          }
-          break;
-      }
-
-      if (!data[key]) {
-        data[key] = { value: 0, count: 0 };
-      }
-      data[key].value += sale.total_amount;
-      data[key].count += 1;
-    });
-
-    const sortedData = Object.entries(data)
-      .map(([label, { value, count }]) => ({ label, value, count }))
-      .sort((a, b) => {
-        // Sort chronologically
-        if (timeFrame === 'year') {
-          return parseInt(a.label) - parseInt(b.label);
+        if (!groupedData[key]) {
+          groupedData[key] = { value: 0, count: 0, minDate: sortDate };
         }
-        return 0; // Keep insertion order for other timeframes
+        groupedData[key].value += sale.total_amount;
+        groupedData[key].count += 1;
+        if (sortDate < groupedData[key].minDate) {
+          groupedData[key].minDate = sortDate;
+        }
       });
+    } else {
+      const saleIdToDate = new Map<string, Date>();
+      sales.forEach((sale) => {
+        saleIdToDate.set(sale.id, new Date(sale.completed_at));
+      });
+
+      saleItems.forEach((item) => {
+        const saleDate = saleIdToDate.get(item.sale_id);
+        if (!saleDate) return;
+
+        const keyResult = getTimeKey(saleDate, now);
+        if (!keyResult) return;
+
+        const { key, sortDate } = keyResult;
+
+        if (!groupedData[key]) {
+          groupedData[key] = { value: 0, count: 0, minDate: sortDate };
+        }
+        groupedData[key].value += item.quantity;
+        groupedData[key].count += item.quantity;
+        if (sortDate < groupedData[key].minDate) {
+          groupedData[key].minDate = sortDate;
+        }
+      });
+    }
+
+    const sortedData = Object.entries(groupedData)
+      .map(([label, { value, count, minDate }]) => ({ label, value, count, minDate }))
+      .sort((a, b) => a.minDate.getTime() - b.minDate.getTime());
 
     setChartData(sortedData);
   };
 
-  const maxValue = Math.max(...chartData.map((d) => d.value), 1);
+  const getTimeKey = (date: Date, now: Date): { key: string; sortDate: Date } | null => {
+    switch (timeFrame) {
+      case 'hour':
+        const hoursDiff = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+        if (hoursDiff < 24) {
+          const sortDate = new Date(date);
+          sortDate.setMinutes(0, 0, 0);
+          return { key: `${date.getHours()}:00`, sortDate };
+        }
+        return null;
+
+      case 'day':
+        const daysDiff = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysDiff < 30) {
+          const sortDate = new Date(date);
+          sortDate.setHours(0, 0, 0, 0);
+          return { key: date.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' }), sortDate };
+        }
+        return null;
+
+      case 'week':
+        const weeksDiff = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24 * 7));
+        if (weeksDiff < 12) {
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          return { key: `Sem ${weekStart.toLocaleDateString('es-AR', { month: 'short', day: 'numeric' })}`, sortDate: weekStart };
+        }
+        return null;
+
+      case 'month':
+        const monthsDiff = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth());
+        if (monthsDiff < 12) {
+          const sortDate = new Date(date.getFullYear(), date.getMonth(), 1);
+          return { key: date.toLocaleDateString('es-AR', { year: 'numeric', month: 'short' }), sortDate };
+        }
+        return null;
+
+      case 'year':
+        const yearsDiff = now.getFullYear() - date.getFullYear();
+        if (yearsDiff < 5) {
+          const sortDate = new Date(date.getFullYear(), 0, 1);
+          return { key: date.getFullYear().toString(), sortDate };
+        }
+        return null;
+
+      default:
+        return null;
+    }
+  };
+
   const timeFrameButtons: { value: TimeFrame; label: string }[] = [
     { value: 'hour', label: 'H' },
     { value: 'day', label: 'D' },
@@ -119,29 +149,66 @@ export function SalesChart({ sales }: SalesChartProps) {
     { value: 'year', label: 'A' },
   ];
 
+  const chartConfig = {
+    value: {
+      label: chartMode === 'sales' ? 'Ventas' : 'Productos',
+      color: 'var(--color-primary)',
+    },
+  };
+
   return (
     <div className="rounded-lg shadow-md p-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
         <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
-          Gráfico de Ventas
+          Gráfico de {chartMode === 'sales' ? 'Ventas' : 'Productos'}
         </h2>
-        <div className="flex gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
-          {timeFrameButtons.map((btn) => (
+        <div className="flex gap-2">
+          <div className="flex gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
             <button
-              key={btn.value}
-              onClick={() => setTimeFrame(btn.value)}
+              onClick={() => setChartMode('sales')}
               className={`px-3 py-1 rounded font-semibold text-sm transition-all ${
-                timeFrame === btn.value ? 'text-white' : ''
+                chartMode === 'sales' ? 'text-white' : ''
               }`}
               style={
-                timeFrame === btn.value
+                chartMode === 'sales'
                   ? { backgroundColor: 'var(--color-primary)' }
                   : { color: 'var(--color-text)' }
               }
             >
-              {btn.label}
+              Ventas
             </button>
-          ))}
+            <button
+              onClick={() => setChartMode('products')}
+              className={`px-3 py-1 rounded font-semibold text-sm transition-all ${
+                chartMode === 'products' ? 'text-white' : ''
+              }`}
+              style={
+                chartMode === 'products'
+                  ? { backgroundColor: 'var(--color-primary)' }
+                  : { color: 'var(--color-text)' }
+              }
+            >
+              Productos
+            </button>
+          </div>
+          <div className="flex gap-1 p-1 rounded-lg" style={{ backgroundColor: 'var(--color-background-accent)' }}>
+            {timeFrameButtons.map((btn) => (
+              <button
+                key={btn.value}
+                onClick={() => setTimeFrame(btn.value)}
+                className={`px-3 py-1 rounded font-semibold text-sm transition-all ${
+                  timeFrame === btn.value ? 'text-white' : ''
+                }`}
+                style={
+                  timeFrame === btn.value
+                    ? { backgroundColor: 'var(--color-primary)' }
+                    : { color: 'var(--color-text)' }
+                }
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -151,71 +218,124 @@ export function SalesChart({ sales }: SalesChartProps) {
         </div>
       ) : (
         <div className="relative">
-          <div className="flex items-end gap-1 h-64" style={{ minHeight: '256px' }}>
-            {chartData.map((point, index) => {
-              const heightPercent = (point.value / maxValue) * 100;
-              const isHovered = hoveredPoint === index;
+          <ChartContainer config={chartConfig} className="h-[300px] w-full">
+            <LineChart data={chartData}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                stroke="var(--color-primary)"
+                opacity={0.1}
+                vertical={false}
+              />
+              <XAxis
+                dataKey="label"
+                stroke="var(--color-text)"
+                opacity={0.5}
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                stroke="var(--color-text)"
+                opacity={0.5}
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value) =>
+                  chartMode === 'sales'
+                    ? `$${value.toLocaleString()}`
+                    : value.toLocaleString()
+                }
+              />
+              <ChartTooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || !payload.length) {
+                    return null;
+                  }
 
-              return (
-                <div
-                  key={index}
-                  className="flex-1 flex flex-col items-center group relative"
-                  onMouseEnter={() => setHoveredPoint(index)}
-                  onMouseLeave={() => setHoveredPoint(null)}
-                >
-                  {isHovered && (
-                    <div
-                      className="absolute bottom-full mb-2 px-3 py-2 rounded-lg shadow-lg text-sm whitespace-nowrap z-10"
-                      style={{ backgroundColor: 'var(--color-background)', color: 'var(--color-text)' }}
-                    >
-                      <div className="font-bold">{formatPrice(point.value)}</div>
-                      <div className="text-xs opacity-60">
-                        {formatNumber(point.count)} {point.count === 1 ? 'venta' : 'ventas'}
+                  const dataPoint = payload[0].payload;
+                  const value = dataPoint.value;
+                  const count = dataPoint.count;
+
+                  return (
+                    <div className="rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                      <div className="font-medium mb-1" style={{ color: 'var(--color-text)' }}>
+                        {label}
                       </div>
-                      <div className="text-xs opacity-60 mt-1">{point.label}</div>
+                      {chartMode === 'sales' ? (
+                        <>
+                          <div className="font-bold" style={{ color: 'var(--color-primary)' }}>
+                            {formatPrice(value)}
+                          </div>
+                          <div className="text-xs opacity-60" style={{ color: 'var(--color-text)' }}>
+                            {formatNumber(count)} {count === 1 ? 'venta' : 'ventas'}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="font-bold" style={{ color: 'var(--color-primary)' }}>
+                            {formatNumber(value)} unidades
+                          </div>
+                          <div className="text-xs opacity-60" style={{ color: 'var(--color-text)' }}>
+                            {formatNumber(count)} {count === 1 ? 'producto' : 'productos'}
+                          </div>
+                        </>
+                      )}
                     </div>
-                  )}
-                  <div
-                    className="w-full rounded-t transition-all cursor-pointer"
-                    style={{
-                      height: `${heightPercent}%`,
-                      backgroundColor: isHovered ? 'var(--color-accent)' : 'var(--color-primary)',
-                      minHeight: point.value > 0 ? '4px' : '0',
-                      opacity: isHovered ? 1 : 0.85,
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex gap-1 mt-2 overflow-x-auto">
-            {chartData.map((point, index) => (
-              <div
-                key={index}
-                className="flex-1 text-center text-xs opacity-60"
-                style={{ color: 'var(--color-text)', minWidth: '30px' }}
-              >
-                {index % Math.ceil(chartData.length / 8) === 0 && (
-                  <span className="block truncate">{point.label}</span>
-                )}
-              </div>
-            ))}
-          </div>
+                  );
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke="var(--color-primary)"
+                strokeWidth={3}
+                dot={{
+                  fill: 'var(--color-primary)',
+                  strokeWidth: 2,
+                  r: 4,
+                  stroke: 'var(--color-background-secondary)',
+                }}
+                activeDot={{
+                  r: 6,
+                  fill: 'var(--color-accent)',
+                  stroke: 'var(--color-background-secondary)',
+                }}
+              />
+            </LineChart>
+          </ChartContainer>
 
           <div className="mt-4 flex justify-between items-center text-sm" style={{ color: 'var(--color-text)' }}>
-            <div>
-              <span className="opacity-60">Total: </span>
-              <span className="font-bold" style={{ color: 'var(--color-primary)' }}>
-                {formatPrice(chartData.reduce((sum, d) => sum + d.value, 0))}
-              </span>
-            </div>
-            <div>
-              <span className="opacity-60">Ventas: </span>
-              <span className="font-bold">
-                {chartData.reduce((sum, d) => sum + d.count, 0)}
-              </span>
-            </div>
+            {chartMode === 'sales' ? (
+              <>
+                <div>
+                  <span className="opacity-60">Total: </span>
+                  <span className="font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {formatPrice(chartData.reduce((sum, d) => sum + d.value, 0))}
+                  </span>
+                </div>
+                <div>
+                  <span className="opacity-60">Ventas: </span>
+                  <span className="font-bold">
+                    {chartData.reduce((sum, d) => sum + d.count, 0)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span className="opacity-60">Total Unidades: </span>
+                  <span className="font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {formatNumber(chartData.reduce((sum, d) => sum + d.value, 0))}
+                  </span>
+                </div>
+                <div>
+                  <span className="opacity-60">Productos: </span>
+                  <span className="font-bold">
+                    {chartData.reduce((sum, d) => sum + d.count, 0)}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

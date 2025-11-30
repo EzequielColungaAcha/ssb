@@ -1,18 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Minus, RefreshCw, ChevronDown, ChevronUp, History } from 'lucide-react';
+import { Wallet, Plus, Minus, RefreshCw, ChevronDown, ChevronUp, History, DoorClosed, X, Package, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCashDrawer } from '../hooks/useCashDrawer';
-import { CashMovement } from '../lib/indexeddb';
+import { useSales } from '../hooks/useSales';
+import { CashMovement, Sale, SaleItem } from '../lib/indexeddb';
 import { translations as t } from '../lib/translations';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 export function CashDrawerView() {
-  const { bills, updateBillQuantity, getTotalCash, getCashMovements, loading } = useCashDrawer();
+  const { bills, updateBillQuantity, getTotalCash, getCashMovements, resetCashDrawer, loading } = useCashDrawer();
+  const { getSaleById, getSaleItems } = useSales();
   const [editingBill, setEditingBill] = useState<number | null>(null);
   const [newQuantity, setNewQuantity] = useState('');
   const [showMovements, setShowMovements] = useState(false);
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(false);
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+  const [showSaleModal, setShowSaleModal] = useState(false);
 
   useEffect(() => {
     if (showMovements) {
@@ -29,7 +34,12 @@ export function CashDrawerView() {
 
   const handleUpdateQuantity = async (billValue: number, quantity: number) => {
     try {
-      await updateBillQuantity(billValue, quantity, 'manual_add', 'Ajuste manual');
+      const bill = bills.find((b) => b.denomination === billValue);
+      const isIncrease = bill && quantity > bill.quantity;
+      const logType = isIncrease ? 'manual_add' : 'manual_remove';
+      const description = isIncrease ? 'Ajuste manual (agregado)' : 'Ajuste manual (retiro)';
+
+      await updateBillQuantity(billValue, quantity, logType, description);
       setEditingBill(null);
       setNewQuantity('');
       if (showMovements) {
@@ -70,6 +80,8 @@ export function CashDrawerView() {
         return t.cashDrawer.movementManualRemove;
       case 'change_given':
         return t.cashDrawer.movementChangeGiven;
+      case 'cash_closing':
+        return t.cashDrawer.movementCashClosing;
     }
   };
 
@@ -81,6 +93,55 @@ export function CashDrawerView() {
       case 'manual_remove':
       case 'change_given':
         return 'text-red-600 dark:text-red-400';
+      case 'cash_closing':
+        return 'text-blue-600 dark:text-blue-400';
+    }
+  };
+
+  const handleResetCashDrawer = () => {
+    const totalCash = getTotalCash();
+
+    if (totalCash === 0) {
+      toast.error('La caja ya está vacía');
+      return;
+    }
+
+    toast('Cierre de Caja', {
+      description: `¿Estás seguro de que deseas cerrar la caja? Se registrará el estado actual (${formatPrice(totalCash)}) y todos los billetes se establecerán a 0.`,
+      action: {
+        label: 'Cerrar',
+        onClick: async () => {
+          try {
+            await resetCashDrawer();
+            toast.success('Caja cerrada correctamente');
+            if (showMovements) {
+              loadMovements();
+            }
+          } catch (error) {
+            toast.error('Error al cerrar la caja');
+          }
+        },
+      },
+      cancel: {
+        label: 'Cancelar',
+        onClick: () => {},
+      },
+    });
+  };
+
+  const handleViewSale = async (saleId: string) => {
+    try {
+      const sale = await getSaleById(saleId);
+      if (sale) {
+        setSelectedSale(sale);
+        const items = await getSaleItems(saleId);
+        setSaleItems(items);
+        setShowSaleModal(true);
+      } else {
+        toast.error('No se pudo cargar la venta');
+      }
+    } catch (error) {
+      toast.error('Error al cargar los detalles de la venta');
     }
   };
 
@@ -103,7 +164,7 @@ export function CashDrawerView() {
       </div>
 
       <div className="rounded-lg shadow-lg p-6 mb-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <div className="text-sm opacity-60 mb-1" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.totalCash}</div>
             <div className="text-4xl font-bold" style={{ color: 'var(--color-primary)' }}>
@@ -112,6 +173,14 @@ export function CashDrawerView() {
           </div>
           <Wallet size={64} className="text-gray-300 dark:text-gray-600" />
         </div>
+        <button
+          onClick={handleResetCashDrawer}
+          disabled={totalCash === 0}
+          className="w-full py-2 px-4 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-semibold transition-colors"
+        >
+          <DoorClosed size={18} />
+          Cierre de Caja
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -235,9 +304,12 @@ export function CashDrawerView() {
                             {getMovementTypeLabel(movement.movement_type)}
                           </span>
                           {movement.sale_id && (
-                            <span className="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white">
+                            <button
+                              onClick={() => handleViewSale(movement.sale_id!)}
+                              className="text-xs px-2 -py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer"
+                            >
                               Venta #{movement.sale_id.slice(0, 8)}
-                            </span>
+                            </button>
                           )}
                         </div>
                         <div className="text-sm text-gray-600 dark:text-gray-300 space-y-1">
@@ -269,6 +341,169 @@ export function CashDrawerView() {
           </div>
         )}
       </div>
+
+      {showSaleModal && selectedSale && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div
+            className="rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between p-6 border-b dark:border-gray-700" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
+              <h2 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>
+                Detalles de Venta
+              </h2>
+              <button
+                onClick={() => setShowSaleModal(false)}
+                className="items-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                <X size={24} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div
+                className="mb-6 p-4 rounded-lg"
+                style={{
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'white',
+                }}
+              >
+                <div className="text-sm opacity-90 mb-1">Número de Venta</div>
+                <div className="text-2xl font-bold mb-3">
+                  {selectedSale.sale_number}
+                </div>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="opacity-90">Fecha</div>
+                    <div className="font-semibold">
+                      {formatDate(selectedSale.completed_at)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="opacity-90">Pago</div>
+                    <div className="font-semibold capitalize">
+                      {selectedSale.payment_method}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <h3
+                  className="font-semibold mb-3 flex items-center gap-2"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <Package size={18} />
+                  Artículos
+                </h3>
+                <div className="space-y-2">
+                  {saleItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex justify-between items-center p-3 rounded-lg"
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                      }}
+                    >
+                      <div>
+                        <div
+                          className="font-semibold"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {item.product_name}
+                        </div>
+                        <div
+                          className="text-sm opacity-60"
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {formatPrice(item.product_price)} ×{' '}
+                          {formatNumber(item.quantity)}
+                        </div>
+                      </div>
+                      <div
+                        className="font-bold"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {formatPrice(item.subtotal)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t pt-4 space-y-2">
+                <div
+                  className="flex justify-between text-lg"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <span>Total:</span>
+                  <span className="font-bold">
+                    {formatPrice(selectedSale.total_amount)}
+                  </span>
+                </div>
+                {selectedSale.cash_received && (
+                  <>
+                    <div className="pt-2">
+                      <div
+                        className="flex justify-between text-sm mb-2"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span className="font-semibold">
+                          Efectivo Recibido:
+                        </span>
+                        <span className="font-bold">
+                          {formatPrice(selectedSale.cash_received)}
+                        </span>
+                      </div>
+                      {selectedSale.bills_received &&
+                        Object.keys(selectedSale.bills_received).length > 0 && (
+                          <div className="ml-4 mt-1 flex flex-wrap gap-1">
+                            {Object.entries(selectedSale.bills_received)
+                              .sort(([a], [b]) => Number(b) - Number(a))
+                              .map(([denomination, quantity]) => (
+                                <span
+                                  key={denomination}
+                                  className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded"
+                                >
+                                  {formatNumber(quantity)}x{' '}
+                                  {formatPrice(Number(denomination))}
+                                </span>
+                              ))}
+                          </div>
+                        )}
+                    </div>
+
+                    <div className="pt-2">
+                      <div className="flex justify-between text-sm dark:text-gray-300 mb-2">
+                        <span className="font-semibold">Cambio Entregado:</span>
+                        <span className="font-bold">
+                          {formatPrice(selectedSale.change_given || 0)}
+                        </span>
+                      </div>
+                      {selectedSale.bills_change &&
+                        Object.keys(selectedSale.bills_change).length > 0 && (
+                          <div className="ml-4 mt-1 flex flex-wrap gap-1">
+                            {Object.entries(selectedSale.bills_change)
+                              .sort(([a], [b]) => Number(b) - Number(a))
+                              .map(([denomination, quantity]) => (
+                                <span
+                                  key={denomination}
+                                  className="text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded"
+                                >
+                                  {formatNumber(quantity)}x{' '}
+                                  {formatPrice(Number(denomination))}
+                                </span>
+                              ))}
+                          </div>
+                        )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

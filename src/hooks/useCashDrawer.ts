@@ -246,6 +246,51 @@ export function useCashDrawer() {
     }
   };
 
+  const resetCashDrawer = async () => {
+    try {
+      await db.init();
+
+      const currentState: Record<string, number> = {};
+      bills.forEach(bill => {
+        if (bill.quantity > 0) {
+          currentState[bill.denomination.toString()] = bill.quantity;
+        }
+      });
+
+      for (const bill of bills) {
+        if (bill.quantity > 0) {
+          const updated: CashDrawer = {
+            ...bill,
+            quantity: 0,
+            updated_at: new Date().toISOString(),
+          };
+          const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', bill.denomination);
+          if (existing.length > 0) {
+            await db.put('cash_drawer', { ...updated, id: existing[0].id });
+          }
+        }
+      }
+
+      const totalCashBefore = Object.entries(currentState).reduce(
+        (sum, [denom, qty]) => sum + Number(denom) * qty,
+        0
+      );
+
+      await logMovement(
+        'cash_closing',
+        undefined,
+        currentState,
+        undefined,
+        `Cierre de caja - Total: $${totalCashBefore.toFixed(2)}`
+      );
+
+      await loadBills();
+    } catch (error) {
+      console.error('Error resetting cash drawer:', error);
+      throw error;
+    }
+  };
+
   return {
     bills,
     loading,
@@ -257,6 +302,7 @@ export function useCashDrawer() {
     processCashReceived,
     getTotalCash,
     getCashMovements,
+    resetCashDrawer,
     refresh: loadBills,
   };
 }

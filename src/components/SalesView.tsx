@@ -48,31 +48,47 @@ export function SalesView() {
 
   return (
     <div className='p-6'>
-      <h1
-        className='text-3xl font-bold mb-6'
-        style={{ color: 'var(--color-text)' }}
-      >
-        Historial de Ventas
-      </h1>
+      <div className='mb-6'>
+        <h1
+          className='text-3xl font-bold'
+          style={{ color: 'var(--color-text)' }}
+        >
+          Historial de Ventas
+        </h1>
+        <p
+          className='text-sm opacity-60 mt-1'
+          style={{ color: 'var(--color-text)' }}
+        >
+          Consultá el registro completo de todas las transacciones realizadas
+        </p>
+      </div>
 
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
         <div
           className='rounded-lg shadow-md p-6'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <h2
-            className='text-xl font-bold mb-4'
-            style={{ color: 'var(--color-text)' }}
-          >
-            Ventas Recientes
-          </h2>
+          <div className='flex justify-between items-center mb-4'>
+            <h2
+              className='text-xl font-bold'
+              style={{ color: 'var(--color-text)' }}
+            >
+              Ventas Recientes
+            </h2>
+            <span
+              className='text-sm opacity-60'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {sales.length} {sales.length === 1 ? 'venta' : 'ventas'}
+            </span>
+          </div>
           <div className='space-y-3 max-h-[600px] overflow-auto scrollbar-hide'>
             {sales.length === 0 ? (
               <div className='text-center text-gray-400 py-8'>
                 Aún no hay ventas
               </div>
             ) : (
-              sales.map((sale) => (
+              sales.map((sale, index) => (
                 <div
                   key={sale.id}
                   onClick={() => setSelectedSale(sale)}
@@ -91,8 +107,21 @@ export function SalesView() {
                   }}
                 >
                   <div className='flex justify-between items-start mb-2'>
-                    <div className='font-mono font-semibold'>
-                      {sale.sale_number}
+                    <div className='flex items-center gap-3'>
+                      <div
+                        className='text-2xl font-bold opacity-40'
+                        style={{
+                          color:
+                            selectedSale?.id === sale.id
+                              ? 'white'
+                              : 'var(--color-text)',
+                        }}
+                      >
+                        #{sales.length - index}
+                      </div>
+                      <div className='font-mono font-semibold'>
+                        {sale.sale_number}
+                      </div>
                     </div>
                     <div className='text-lg font-bold'>
                       {formatPrice(sale.total_amount)}

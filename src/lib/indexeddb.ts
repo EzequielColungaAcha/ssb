@@ -1,5 +1,23 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
+
+export interface MateriaPrima {
+  id: string;
+  name: string;
+  unit: 'units' | 'kg';
+  stock: number;
+  cost_per_unit: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductMateriaPrima {
+  id: string;
+  product_id: string;
+  materia_prima_id: string;
+  quantity: number;
+  created_at: string;
+}
 
 export interface Product {
   id: string;
@@ -9,6 +27,8 @@ export interface Product {
   stock: number;
   active: boolean;
   production_cost: number;
+  uses_materia_prima: boolean;
+  display_order?: number;
   created_at: string;
   updated_at: string;
 }
@@ -47,7 +67,7 @@ export interface CashDrawer {
 
 export interface CashMovement {
   id: string;
-  movement_type: 'sale' | 'manual_add' | 'manual_remove' | 'change_given';
+  movement_type: 'sale' | 'manual_add' | 'manual_remove' | 'change_given' | 'cash_closing';
   sale_id?: string;
   bills_in?: Record<string, number>;
   bills_out?: Record<string, number>;
@@ -55,22 +75,56 @@ export interface CashMovement {
   created_at: string;
 }
 
+export interface ThemeConfig {
+  light: {
+    primary: string;
+    accent: string;
+    text: string;
+    background: string;
+    backgroundSecondary: string;
+    backgroundAccent: string;
+  };
+  dark: {
+    primary: string;
+    accent: string;
+    text: string;
+    background: string;
+    backgroundSecondary: string;
+    backgroundAccent: string;
+  };
+}
+
 export interface LogoConfig {
   id: string;
   acronym: string;
+  logo_image?: string;
+  theme_config?: ThemeConfig;
+  updated_at: string;
+}
+
+export interface AppSettings {
+  id: string;
+  pos_layout_locked: boolean;
+  category_order?: string[];
   updated_at: string;
 }
 
 class IndexedDBService {
   private db: IDBDatabase | null = null;
+  private isInitialized = false;
 
   async init(): Promise<void> {
+    if (this.isInitialized && this.db) {
+      return;
+    }
+
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         this.db = request.result;
+        this.isInitialized = true;
         resolve();
       };
 
@@ -124,6 +178,25 @@ class IndexedDBService {
         if (!db.objectStoreNames.contains('logo_config')) {
           db.createObjectStore('logo_config', { keyPath: 'id' });
         }
+
+        if (!db.objectStoreNames.contains('materia_prima')) {
+          const materiaPrimaStore = db.createObjectStore('materia_prima', {
+            keyPath: 'id',
+          });
+          materiaPrimaStore.createIndex('name', 'name', { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains('product_materia_prima')) {
+          const productMateriaPrimaStore = db.createObjectStore('product_materia_prima', {
+            keyPath: 'id',
+          });
+          productMateriaPrimaStore.createIndex('product_id', 'product_id', { unique: false });
+          productMateriaPrimaStore.createIndex('materia_prima_id', 'materia_prima_id', { unique: false });
+        }
+
+        if (!db.objectStoreNames.contains('app_settings')) {
+          db.createObjectStore('app_settings', { keyPath: 'id' });
+        }
       };
     });
   }
@@ -133,8 +206,17 @@ class IndexedDBService {
     mode: IDBTransactionMode = 'readonly'
   ): IDBObjectStore {
     if (!this.db) throw new Error('Database not initialized');
+
+    if (!this.db.objectStoreNames.contains(storeName)) {
+      throw new Error(`Object store '${storeName}' not found. Please refresh the page to upgrade the database.`);
+    }
+
     const transaction = this.db.transaction(storeName, mode);
     return transaction.objectStore(storeName);
+  }
+
+  hasStore(storeName: string): boolean {
+    return this.db ? this.db.objectStoreNames.contains(storeName) : false;
   }
 
   async add<T>(storeName: string, data: T): Promise<string> {
@@ -214,6 +296,8 @@ class IndexedDBService {
       cash_drawer: await this.getAll<CashDrawer>('cash_drawer'),
       cash_movements: await this.getAll<CashMovement>('cash_movements'),
       logo_config: await this.getAll<LogoConfig>('logo_config'),
+      materia_prima: await this.getAll<MateriaPrima>('materia_prima'),
+      product_materia_prima: await this.getAll<ProductMateriaPrima>('product_materia_prima'),
     };
     return JSON.stringify(data, null, 2);
   }
@@ -227,6 +311,8 @@ class IndexedDBService {
     await this.clear('cash_drawer');
     await this.clear('cash_movements');
     await this.clear('logo_config');
+    await this.clear('materia_prima');
+    await this.clear('product_materia_prima');
 
     for (const product of data.products || []) {
       await this.add('products', product);
@@ -246,6 +332,12 @@ class IndexedDBService {
     for (const config of data.logo_config || []) {
       await this.add('logo_config', config);
     }
+    for (const mp of data.materia_prima || []) {
+      await this.add('materia_prima', mp);
+    }
+    for (const pmp of data.product_materia_prima || []) {
+      await this.add('product_materia_prima', pmp);
+    }
   }
 
   async resetDatabase(): Promise<void> {
@@ -255,6 +347,8 @@ class IndexedDBService {
     await this.clear('cash_drawer');
     await this.clear('cash_movements');
     await this.clear('logo_config');
+    await this.clear('materia_prima');
+    await this.clear('product_materia_prima');
   }
 }
 

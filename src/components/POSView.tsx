@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShoppingCart,
   X,
@@ -8,12 +8,33 @@ import {
   Banknote,
   RotateCcw,
   Undo,
+  GripVertical,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Product } from '../lib/indexeddb';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Product, db, AppSettings } from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
+import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 interface CartItem extends Product {
@@ -22,11 +43,113 @@ interface CartItem extends Product {
 
 const BILLS = [10, 20, 50, 100, 200, 500, 1000, 2000, 10000, 20000];
 
+interface SortableProductItemProps {
+  product: Product;
+  isLocked: boolean;
+  onAddToCart: (product: Product) => void;
+  getStock: (product: Product) => number;
+}
+
+function SortableProductItem({ product, isLocked, onAddToCart, getStock }: SortableProductItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: product.id, disabled: isLocked, data: { type: 'product' } });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      {!isLocked && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-2 left-2 z-10 opacity-70 hover:opacity-100 transition-opacity bg-black/30 rounded p-1 backdrop-blur-sm cursor-move"
+        >
+          <GripVertical size={18} className="text-white" />
+        </div>
+      )}
+      <button
+        onClick={() => onAddToCart(product)}
+        className="w-full p-6 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 hover:scale-105"
+        style={{
+          backgroundColor: 'var(--color-primary)',
+          color: 'white',
+        }}
+      >
+        <div className="text-lg font-bold mb-2">{product.name}</div>
+        <div className="text-2xl font-bold mb-1">
+          {formatPrice(product.price)}
+        </div>
+        <div className="text-sm opacity-90">
+          Stock: {formatNumber(getStock(product))}
+        </div>
+      </button>
+    </div>
+  );
+}
+
+interface SortableCategoryProps {
+  category: string;
+  isLocked: boolean;
+  children: React.ReactNode;
+}
+
+function SortableCategory({ category, isLocked, children }: SortableCategoryProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: `category-${category}`, disabled: isLocked, data: { type: 'category' } });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="mb-8">
+      <div className="flex items-center gap-2 mb-4">
+        {!isLocked && (
+          <div
+            {...attributes}
+            {...listeners}
+            className="opacity-70 hover:opacity-100 transition-opacity cursor-move"
+            style={{ color: 'var(--color-text)' }}
+          >
+            <GripVertical size={20} />
+          </div>
+        )}
+        <h2
+          className="text-xl font-semibold capitalize"
+          style={{ color: 'var(--color-text)' }}
+        >
+          {category}
+        </h2>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function POSView() {
-  const { products } = useProducts();
+  const { products, refresh: refreshProducts, updateProduct } = useProducts();
   const { createSale } = useSales();
   const { calculateOptimalChange, processChange, processCashReceived } =
     useCashDrawer();
+  const { checkStockAvailability, deductMateriaPrimaStock, calculateAvailableStock, refresh: refreshMateriaPrima } = useMateriaPrima();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('cash');
@@ -36,44 +159,180 @@ export function POSView() {
   >(null);
   const [processing, setProcessing] = useState(false);
   const [billHistory, setBillHistory] = useState<number[]>([]);
+  const [productStocks, setProductStocks] = useState<Record<string, number>>({});
+  const [sortedProducts, setSortedProducts] = useState<Product[]>([]);
+  const [isLayoutLocked, setIsLayoutLocked] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
 
-  const activeProducts = products.filter((p) => p.active && p.stock > 0);
-  const categories = Array.from(new Set(activeProducts.map((p) => p.category)));
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
-  const addToCart = (product: Product) => {
-    const existing = cart.find((item) => item.id === product.id);
-    if (existing) {
-      if (existing.quantity < product.stock) {
-        setCart(
-          cart.map((item) =>
-            item.id === product.id
-              ? { ...item, quantity: item.quantity + 1 }
-              : item
-          )
-        );
+  useEffect(() => {
+    const loadStocks = async () => {
+      const stocks: Record<string, number> = {};
+      for (const product of products) {
+        if (product.uses_materia_prima) {
+          stocks[product.id] = await calculateAvailableStock(product.id);
+        }
       }
+      setProductStocks(stocks);
+    };
+
+    if (products.length > 0) {
+      loadStocks();
+    }
+  }, [products]);
+
+  useEffect(() => {
+    loadSettings();
+
+    const handleLockChange = (event: Event) => {
+      const customEvent = event as CustomEvent<{ locked: boolean }>;
+      setIsLayoutLocked(customEvent.detail.locked);
+    };
+
+    const handleSaveOrder = () => {
+      saveProductOrder();
+    };
+
+    window.addEventListener('pos-layout-lock-changed', handleLockChange);
+    window.addEventListener('pos-layout-save-order', handleSaveOrder);
+    return () => {
+      window.removeEventListener('pos-layout-lock-changed', handleLockChange);
+      window.removeEventListener('pos-layout-save-order', handleSaveOrder);
+    };
+  }, [sortedProducts]);
+
+  useEffect(() => {
+    const sorted = [...products].sort((a, b) => {
+      const orderA = a.display_order ?? 999999;
+      const orderB = b.display_order ?? 999999;
+      return orderA - orderB;
+    });
+    setSortedProducts(sorted);
+  }, [products]);
+
+  const loadSettings = async () => {
+    try {
+      await db.init();
+      const settings = await db.get<AppSettings>('app_settings', 'default');
+      if (settings) {
+        setIsLayoutLocked(settings.pos_layout_locked);
+        if (settings.category_order) {
+          setCategoryOrder(settings.category_order);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
+
+  const loadStocks = async () => {
+    const stocks: Record<string, number> = {};
+    for (const product of products) {
+      if (product.uses_materia_prima) {
+        stocks[product.id] = await calculateAvailableStock(product.id);
+      }
+    }
+    setProductStocks(stocks);
+  };
+
+  const getProductStock = (product: Product) => {
+    if (product.uses_materia_prima) {
+      return productStocks[product.id] || 0;
+    }
+    return product.stock;
+  };
+
+  const activeProducts = sortedProducts.filter((p) => p.active && getProductStock(p) > 0);
+  const allCategories = Array.from(new Set(activeProducts.map((p) => p.category)));
+
+  const categories = categoryOrder.length > 0
+    ? categoryOrder.filter(cat => allCategories.includes(cat))
+    : allCategories;
+
+  const addToCart = async (product: Product) => {
+    const existing = cart.find((item) => item.id === product.id);
+    const newQuantity = existing ? existing.quantity + 1 : 1;
+    const availableStock = getProductStock(product);
+
+    if (newQuantity > availableStock) {
+      toast.error('Stock insuficiente');
+      return;
+    }
+
+    if (product.uses_materia_prima) {
+      const hasStock = await checkStockAvailability(product.id);
+      if (!hasStock) {
+        toast.error('Materia prima insuficiente para este producto');
+        return;
+      }
+    }
+
+    if (existing) {
+      setCart(
+        cart.map((item) =>
+          item.id === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      );
     } else {
       setCart([...cart, { ...product, quantity: 1 }]);
     }
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(cart.filter((item) => item.id !== productId));
+    const newCart = cart.filter((item) => item.id !== productId);
+    setCart(newCart);
+
+    if (newCart.length === 0) {
+      setShowPayment(false);
+      setCashReceived(0);
+      setChangeBreakdown(null);
+      setBillHistory([]);
+      setPaymentMethod('cash');
+    }
   };
 
-  const updateQuantity = (productId: string, quantity: number) => {
+  const updateQuantity = async (productId: string, quantity: number) => {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
 
     if (quantity <= 0) {
       removeFromCart(productId);
-    } else if (quantity <= product.stock) {
-      setCart(
-        cart.map((item) =>
-          item.id === productId ? { ...item, quantity } : item
-        )
-      );
+      return;
     }
+
+    const availableStock = getProductStock(product);
+
+    if (quantity > availableStock) {
+      toast.error('Stock insuficiente');
+      return;
+    }
+
+    if (product.uses_materia_prima) {
+      const hasStock = await checkStockAvailability(product.id, quantity);
+      if (!hasStock) {
+        toast.error('Materia prima insuficiente para esta cantidad');
+        return;
+      }
+    }
+
+    setCart(
+      cart.map((item) =>
+        item.id === productId ? { ...item, quantity } : item
+      )
+    );
   };
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -161,9 +420,19 @@ export function POSView() {
         billsChangeData
       );
 
+      for (const item of cart) {
+        if (item.uses_materia_prima) {
+          await deductMateriaPrimaStock(item.id, item.quantity);
+        }
+      }
+
       if (paymentMethod === 'cash' && saleData && changeBreakdown) {
         await processChange(changeBreakdown, saleData.id);
       }
+
+      await refreshProducts();
+      await refreshMateriaPrima();
+      await loadStocks();
 
       setCart([]);
       setCashReceived(0);
@@ -200,55 +469,152 @@ export function POSView() {
     return false;
   };
 
-  return (
-    <div
-      className='flex h-screen'
-      style={{ backgroundColor: 'var(--color-background)' }}
-    >
-      <div className='flex-1 p-6 overflow-auto scrollbar-hide'>
-        {categories.map((category) => (
-          <div key={category} className='mb-8'>
-            <h2
-              className='text-xl font-semibold mb-4 capitalize'
-              style={{ color: 'var(--color-text)' }}
-            >
-              {category}
-            </h2>
-            <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
-              {activeProducts
-                .filter((p) => p.category === category)
-                .map((product) => (
-                  <button
-                    key={product.id}
-                    onClick={() => addToCart(product)}
-                    className='p-6 rounded-lg shadow-md hover:shadow-lg transition-all'
-                    style={{
-                      backgroundColor: 'var(--color-primary)',
-                      color: 'white',
-                    }}
-                  >
-                    <div className='text-lg font-bold mb-2'>{product.name}</div>
-                    <div className='text-2xl font-bold mb-1'>
-                      {formatPrice(product.price)}
-                    </div>
-                    <div className='text-sm opacity-90'>
-                      Stock: {formatNumber(product.stock)}
-                    </div>
-                  </button>
-                ))}
-            </div>
-          </div>
-        ))}
-      </div>
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
 
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const activeData = active.data.current;
+    const overData = over.data.current;
+
+    if (activeData?.type === 'category' && overData?.type === 'category') {
+      const activeCategory = (active.id as string).replace('category-', '');
+      const overCategory = (over.id as string).replace('category-', '');
+
+      const oldIndex = categories.indexOf(activeCategory);
+      const newIndex = categories.indexOf(overCategory);
+
+      const newCategoryOrder = arrayMove(categories, oldIndex, newIndex);
+      setCategoryOrder(newCategoryOrder);
+
+      try {
+        await db.init();
+        const settings = await db.get<AppSettings>('app_settings', 'default') || {
+          id: 'default',
+          pos_layout_locked: isLayoutLocked,
+          updated_at: new Date().toISOString(),
+        };
+        settings.category_order = newCategoryOrder;
+        settings.updated_at = new Date().toISOString();
+        await db.put('app_settings', settings);
+      } catch (error) {
+        console.error('Error saving category order:', error);
+      }
+    } else if (activeData?.type === 'product' && overData?.type === 'product') {
+      const oldIndex = sortedProducts.findIndex((p) => p.id === active.id);
+      const newIndex = sortedProducts.findIndex((p) => p.id === over.id);
+
+      const activeProduct = sortedProducts[oldIndex];
+      const overProduct = sortedProducts[newIndex];
+
+      if (activeProduct.category !== overProduct.category) {
+        return;
+      }
+
+      const newProducts = arrayMove(sortedProducts, oldIndex, newIndex);
+      setSortedProducts(newProducts);
+
+      try {
+        for (let i = 0; i < newProducts.length; i++) {
+          const product = newProducts[i];
+          await updateProduct(product.id, { ...product, display_order: i });
+        }
+      } catch (error) {
+        console.error('Error saving product order:', error);
+      }
+    }
+  };
+
+  const saveProductOrder = async () => {
+    try {
+      for (let i = 0; i < sortedProducts.length; i++) {
+        const product = sortedProducts[i];
+        await updateProduct(product.id, { ...product, display_order: i });
+      }
+    } catch (error) {
+      console.error('Error saving product order:', error);
+    }
+  };
+
+  const activeProduct = activeId && !activeId.toString().startsWith('category-')
+    ? sortedProducts.find(p => p.id === activeId)
+    : null;
+
+  const activeCategory = activeId && activeId.toString().startsWith('category-')
+    ? activeId.toString().replace('category-', '')
+    : null;
+
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
       <div
-        className='w-96 shadow-xl p-6 flex flex-col'
-        style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        className='flex h-screen'
+        style={{ backgroundColor: 'var(--color-background)' }}
       >
+        <div className='flex-1 p-6 overflow-auto scrollbar-hide'>
+          <SortableContext
+            items={categories.map(cat => `category-${cat}`)}
+            disabled={isLayoutLocked}
+          >
+            {categories.map((category) => {
+              const categoryProducts = activeProducts.filter((p) => p.category === category);
+              const categoryProductIds = categoryProducts.map(p => p.id);
+
+              return (
+                <SortableCategory
+                  key={category}
+                  category={category}
+                  isLocked={isLayoutLocked}
+                >
+                  <SortableContext
+                    items={categoryProductIds}
+                    strategy={rectSortingStrategy}
+                    disabled={isLayoutLocked}
+                  >
+                    <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                      {categoryProducts.map((product) => (
+                        <SortableProductItem
+                          key={product.id}
+                          product={product}
+                          isLocked={isLayoutLocked}
+                          onAddToCart={addToCart}
+                          getStock={getProductStock}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </SortableCategory>
+              );
+            })}
+          </SortableContext>
+        </div>
+
+        <div
+          className='w-96 shadow-xl p-6 flex flex-col'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
         <div className='flex items-center justify-end mb-6'>
           {cart.length > 0 && (
             <button
-              onClick={() => setCart([])}
+              onClick={() => {
+                setCart([]);
+                setShowPayment(false);
+                setCashReceived(0);
+                setChangeBreakdown(null);
+                setBillHistory([]);
+                setPaymentMethod('cash');
+              }}
               className='text-red-500 hover:text-red-700'
             >
               <Trash2 size={20} />
@@ -477,7 +843,7 @@ export function POSView() {
                     <div className='text-xs text-gray-500 dark:text-gray-400 mb-2'>
                       Agregar billetes:
                     </div>
-                    <div className='grid grid-cols-3 gap-2'>
+                    <div className='grid grid-cols-5 gap-2'>
                       {BILLS.map((bill) => (
                         <button
                           key={bill}
@@ -522,6 +888,38 @@ export function POSView() {
           )}
         </div>
       </div>
-    </div>
+      </div>
+
+      <DragOverlay>
+        {activeProduct ? (
+          <div className="opacity-80 rotate-3 scale-105 shadow-2xl">
+            <button
+              className="w-full p-6 rounded-lg"
+              style={{
+                backgroundColor: 'var(--color-primary)',
+                color: 'white',
+              }}
+            >
+              <div className="text-lg font-bold mb-2">{activeProduct.name}</div>
+              <div className="text-2xl font-bold mb-1">
+                {formatPrice(activeProduct.price)}
+              </div>
+              <div className="text-sm opacity-90">
+                Stock: {formatNumber(getProductStock(activeProduct))}
+              </div>
+            </button>
+          </div>
+        ) : activeCategory ? (
+          <div className="opacity-80 scale-105 shadow-2xl bg-gray-800/90 backdrop-blur-sm rounded-lg p-4">
+            <div className="flex items-center gap-2">
+              <GripVertical size={20} className="text-white" />
+              <h2 className="text-xl font-semibold capitalize text-white">
+                {activeCategory}
+              </h2>
+            </div>
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }

@@ -70,7 +70,7 @@ export function useSales() {
 
       for (const item of items) {
         const product = await db.get('products', item.product_id);
-        if (product) {
+        if (product && !product.uses_materia_prima) {
           const updatedProduct = {
             ...product,
             stock: Math.max(0, product.stock - item.quantity),
@@ -98,11 +98,22 @@ export function useSales() {
     }
   };
 
+  const getSaleById = async (saleId: string): Promise<Sale | null> => {
+    try {
+      await db.init();
+      return await db.get<Sale>('sales', saleId);
+    } catch (error) {
+      console.error('Error loading sale:', error);
+      return null;
+    }
+  };
+
   return {
     sales,
     loading,
     createSale,
     getSaleItems,
+    getSaleById,
     refresh: loadSales,
   };
 }

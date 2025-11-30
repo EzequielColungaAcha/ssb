@@ -1,24 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db } from '../lib/indexeddb';
+import { db, LogoConfig, ThemeConfig } from '../lib/indexeddb';
 
-export interface ThemeConfig {
-  light: {
-    primary: string;
-    accent: string;
-    text: string;
-    background: string;
-    backgroundSecondary: string;
-    backgroundAccent: string;
-  };
-  dark: {
-    primary: string;
-    accent: string;
-    text: string;
-    background: string;
-    backgroundSecondary: string;
-    backgroundAccent: string;
-  };
-}
+export type { ThemeConfig };
 
 interface ThemeContextType {
   theme: 'light' | 'dark';
@@ -26,34 +9,30 @@ interface ThemeContextType {
   themeConfig: ThemeConfig;
   updateThemeConfig: (config: ThemeConfig) => Promise<void>;
   applyTheme: () => void;
+  isLoading: boolean;
 }
 
 const defaultThemeConfig: ThemeConfig = {
   light: {
-    primary: '#ef4444',
-    accent: '#f59e0b',
-    text: '#1f2937',
-    background: '#f9fafb',
+    primary: '#dc2626',
+    accent: '#ea580c',
+    text: '#111827',
+    background: '#f3f4f6',
     backgroundSecondary: '#ffffff',
-    backgroundAccent: '#f3f4f6',
+    backgroundAccent: '#e5e7eb',
   },
   dark: {
-    primary: '#dc2626',
-    accent: '#f59e0b',
+    primary: '#ef4444',
+    accent: '#fb923c',
     text: '#f9fafb',
-    background: '#111827',
-    backgroundSecondary: '#1f2937',
-    backgroundAccent: '#374151',
+    background: '#0f172a',
+    backgroundSecondary: '#1e293b',
+    backgroundAccent: '#334155',
   },
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-interface ThemeConfigData {
-  id: string;
-  config: ThemeConfig;
-  updated_at: string;
-}
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -62,33 +41,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [themeConfig, setThemeConfig] = useState<ThemeConfig>(defaultThemeConfig);
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  useEffect(() => {
-    loadThemeConfig();
-  }, []);
+  const applyThemeColors = (config: ThemeConfig, currentTheme: 'light' | 'dark') => {
+    const colors = config[currentTheme];
+    document.documentElement.style.setProperty('--color-primary', colors.primary);
+    document.documentElement.style.setProperty('--color-accent', colors.accent);
+    document.documentElement.style.setProperty('--color-text', colors.text);
+    document.documentElement.style.setProperty('--color-background', colors.background);
+    document.documentElement.style.setProperty('--color-background-secondary', colors.backgroundSecondary);
+    document.documentElement.style.setProperty('--color-background-accent', colors.backgroundAccent);
 
-  const loadThemeConfig = async () => {
-    try {
-      await db.init();
-      const data = await db.get<ThemeConfigData>('logo_config', 'theme_config');
-      if (data?.config) {
-        setThemeConfig(data.config);
-      }
-    } catch (error) {
-      console.error('Failed to load theme config:', error);
-    }
-  };
-
-  const applyTheme = () => {
-    const currentTheme = themeConfig[theme];
-    document.documentElement.style.setProperty('--color-primary', currentTheme.primary);
-    document.documentElement.style.setProperty('--color-accent', currentTheme.accent);
-    document.documentElement.style.setProperty('--color-text', currentTheme.text);
-    document.documentElement.style.setProperty('--color-background', currentTheme.background);
-    document.documentElement.style.setProperty('--color-background-secondary', currentTheme.backgroundSecondary);
-    document.documentElement.style.setProperty('--color-background-accent', currentTheme.backgroundAccent);
-
-    if (theme === 'dark') {
+    if (currentTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
@@ -96,8 +60,40 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    applyTheme();
-  }, [theme, themeConfig]);
+    const loadThemeConfig = async () => {
+      try {
+        await db.init();
+        const data = await db.getAll<LogoConfig>('logo_config');
+        console.log('Loading combined config from IndexedDB:', data);
+        if (data.length > 0 && data[0].theme_config) {
+          console.log('Applying loaded theme config:', data[0].theme_config);
+          setThemeConfig(data[0].theme_config);
+          applyThemeColors(data[0].theme_config, theme);
+        } else {
+          console.log('No theme config found, using default');
+          applyThemeColors(defaultThemeConfig, theme);
+        }
+      } catch (error) {
+        console.error('Failed to load theme config:', error);
+        applyThemeColors(defaultThemeConfig, theme);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+
+    loadThemeConfig();
+  }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      applyThemeColors(themeConfig, theme);
+    }
+  }, [theme, themeConfig, isLoaded]);
+
+  const applyTheme = (configToApply?: ThemeConfig) => {
+    const config = configToApply || themeConfig;
+    applyThemeColors(config, theme);
+  };
 
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
@@ -107,14 +103,29 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const updateThemeConfig = async (config: ThemeConfig) => {
     try {
+      console.log('updateThemeConfig called with:', config);
       await db.init();
-      const themeData: ThemeConfigData = {
-        id: 'theme_config',
-        config,
+      const existing = await db.getAll<LogoConfig>('logo_config');
+
+      const combinedConfig: LogoConfig = {
+        id: existing.length > 0 ? existing[0].id : crypto.randomUUID(),
+        acronym: existing.length > 0 ? existing[0].acronym : 'SSB',
+        logo_image: existing.length > 0 ? existing[0].logo_image : undefined,
+        theme_config: config,
         updated_at: new Date().toISOString(),
       };
-      await db.put('logo_config', themeData);
+
+      console.log('Saving combined config to IndexedDB:', combinedConfig);
+
+      if (existing.length > 0) {
+        await db.put('logo_config', combinedConfig);
+      } else {
+        await db.add('logo_config', combinedConfig);
+      }
+
+      console.log('Theme config saved successfully');
       setThemeConfig(config);
+      applyTheme(config);
     } catch (error) {
       console.error('Failed to update theme config:', error);
       throw error;
@@ -122,7 +133,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, themeConfig, updateThemeConfig, applyTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, themeConfig, updateThemeConfig, applyTheme, isLoading: !isLoaded }}>
       {children}
     </ThemeContext.Provider>
   );
