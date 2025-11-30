@@ -4,7 +4,7 @@ import {
   Package,
   BarChart3,
   Settings,
-  ShoppingBag,
+  History,
   Wallet,
   ChevronLeft,
   ChevronRight,
@@ -47,7 +47,10 @@ function AppContent() {
     const checkDatabase = async () => {
       try {
         await db.init();
-        if (!db.hasStore('materia_prima') || !db.hasStore('product_materia_prima')) {
+        if (
+          !db.hasStore('materia_prima') ||
+          !db.hasStore('product_materia_prima')
+        ) {
           setNeedsRefresh(true);
         }
       } catch (error) {
@@ -78,7 +81,7 @@ function AppContent() {
     { id: 'pos' as View, label: t.nav.pos, icon: Store },
     { id: 'products' as View, label: t.nav.products, icon: Package },
     { id: 'materiaprima' as View, label: 'Materia Prima', icon: Beef },
-    { id: 'sales' as View, label: t.nav.sales, icon: ShoppingBag },
+    { id: 'sales' as View, label: t.nav.sales, icon: History },
     { id: 'metrics' as View, label: t.nav.metrics, icon: BarChart3 },
     { id: 'cashdrawer' as View, label: t.nav.cashDrawer, icon: Wallet },
     { id: 'settings' as View, label: t.nav.settings, icon: Settings },
@@ -128,12 +131,10 @@ function AppContent() {
             >
               Actualización Requerida
             </h2>
-            <p
-              className='mb-6'
-              style={{ color: 'var(--color-text)' }}
-            >
-              La base de datos necesita actualizarse para soportar las nuevas funciones de Materia Prima.
-              Por favor, recargá la página para continuar.
+            <p className='mb-6' style={{ color: 'var(--color-text)' }}>
+              La base de datos necesita actualizarse para soportar las nuevas
+              funciones de Materia Prima. Por favor, recargá la página para
+              continuar.
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -260,14 +261,6 @@ function AppContent() {
               <span className='text-base font-medium'>{t.nav.collapse}</span>
             )}
           </button>
-          {!sidebarCollapsed && (
-            <div
-              className='text-xs opacity-60 text-center mt-2'
-              style={{ color: 'var(--color-text)' }}
-            >
-              v1.0.0
-            </div>
-          )}
         </div>
       </nav>
 
