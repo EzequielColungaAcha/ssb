@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Upload, X, Lock, Settings } from 'lucide-react';
+import { Palette, Type, Upload, X, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLogo } from '../contexts/LogoContext';
@@ -15,7 +15,6 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
-import { db, AppSettings } from '../lib/indexeddb';
 
 export function SettingsView() {
   const { theme, themeConfig, updateThemeConfig } = useTheme();
@@ -26,7 +25,6 @@ export function SettingsView() {
     logoConfig.logo_image
   );
   const [saving, setSaving] = useState(false);
-  const [posLayoutLocked, setPosLayoutLocked] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,22 +35,6 @@ export function SettingsView() {
     setAcronym(logoConfig.acronym);
     setLogoImage(logoConfig.logo_image);
   }, [logoConfig]);
-
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
-    try {
-      await db.init();
-      const settings = await db.get<AppSettings>('app_settings', 'default');
-      if (settings) {
-        setPosLayoutLocked(settings.pos_layout_locked);
-      }
-    } catch (error) {
-      console.error('Error loading settings:', error);
-    }
-  };
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -103,58 +85,6 @@ export function SettingsView() {
     }
   };
 
-  const handlePosLayoutLockToggle = async () => {
-    try {
-      await db.init();
-      const newLockState = !posLayoutLocked;
-
-      // If we’re locking, ask POSView to save current product order
-      if (newLockState) {
-        window.dispatchEvent(new CustomEvent('pos-layout-save-order'));
-      }
-
-      // ✅ Load existing settings so we don't lose category_order (or any future fields)
-      const existingSettings = (await db.get<AppSettings>(
-        'app_settings',
-        'default'
-      )) || {
-        id: 'default',
-        pos_layout_locked: false,
-        // If it never existed, start with empty category order
-        category_order: [],
-        updated_at: new Date().toISOString(),
-      };
-
-      const updatedSettings: AppSettings = {
-        ...existingSettings, // keep category_order and other fields
-        pos_layout_locked: newLockState, // override only what we’re changing
-        updated_at: new Date().toISOString(),
-      };
-
-      await db.put('app_settings', updatedSettings);
-      setPosLayoutLocked(newLockState);
-
-      if (newLockState) {
-        toast.success(
-          'Diseño de POS bloqueado. No se podrán mover productos hasta desbloquear.'
-        );
-      } else {
-        toast.success(
-          'Diseño de POS desbloqueado. Ahora puedes reorganizar los productos.'
-        );
-      }
-
-      window.dispatchEvent(
-        new CustomEvent('pos-layout-lock-changed', {
-          detail: { locked: newLockState },
-        })
-      );
-    } catch (error) {
-      console.error('Error toggling POS layout lock:', error);
-      toast.error('Error al cambiar el estado del bloqueo');
-    }
-  };
-
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -197,7 +127,7 @@ export function SettingsView() {
   };
 
   return (
-    <div className='p-6 max-w-4xl'>
+    <div className='p-6'>
       <div className='mb-6'>
         <h1
           className='text-3xl font-bold flex items-center gap-3'
@@ -293,387 +223,222 @@ export function SettingsView() {
           </CardTitle>
         </CardHeader>
         <CardContent className='space-y-6'>
+          {/* LIGHT THEME SECTION */}
           <div>
             <h3 className='text-lg font-semibold mb-4 dark:text-white'>
               {t.settings.lightModeColors}
             </h3>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-              <div>
-                <Label>{t.settings.primaryColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.primary}
-                    onChange={(e) =>
-                      handleColorChange('light', 'primary', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.primary}
-                    onChange={(e) =>
-                      handleColorChange('light', 'primary', e.target.value)
-                    }
-                  />
-                </div>
+
+            <div className='grid md:grid-cols-2 gap-6'>
+              {/* Color Pickers - thinner layout */}
+              <div className='space-y-3'>
+                {(
+                  [
+                    ['primary', t.settings.primaryColor],
+                    ['accent', t.settings.accentColor],
+                    ['text', t.settings.textColor],
+                    ['background', t.settings.backgroundColor],
+                    ['backgroundSecondary', 'Color Fondo Secundario'],
+                    ['backgroundAccent', 'Color Fondo Acento'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key}>
+                    <Label>{label}</Label>
+                    <div className='flex items-center gap-2 mt-1'>
+                      <input
+                        type='color'
+                        value={colors.light[key]}
+                        onChange={(e) =>
+                          handleColorChange('light', key, e.target.value)
+                        }
+                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600'
+                      />
+                      <Input
+                        type='text'
+                        value={colors.light[key]}
+                        onChange={(e) =>
+                          handleColorChange('light', key, e.target.value)
+                        }
+                        className='flex-1'
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div>
-                <Label>{t.settings.accentColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.accent}
-                    onChange={(e) =>
-                      handleColorChange('light', 'accent', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.accent}
-                    onChange={(e) =>
-                      handleColorChange('light', 'accent', e.target.value)
-                    }
-                  />
+              {/* Live Preview */}
+              <div
+                className='rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col text-xs'
+                style={{
+                  backgroundColor: colors.light.background,
+                  color: colors.light.text,
+                }}
+              >
+                <div
+                  className='px-3 py-2 font-semibold flex justify-between items-center'
+                  style={{ backgroundColor: colors.light.backgroundSecondary }}
+                >
+                  <span>Encabezado</span>
+                  <span
+                    className='rounded-full px-2 py-1 text-[10px]'
+                    style={{
+                      backgroundColor: colors.light.primary,
+                      color: '#fff',
+                    }}
+                  >
+                    Badge
+                  </span>
                 </div>
-              </div>
 
-              <div>
-                <Label>{t.settings.textColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.text}
-                    onChange={(e) =>
-                      handleColorChange('light', 'text', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.text}
-                    onChange={(e) =>
-                      handleColorChange('light', 'text', e.target.value)
-                    }
-                  />
-                </div>
-              </div>
+                <div className='p-3 space-y-2'>
+                  <button
+                    className='w-full rounded-md py-2 text-xs font-semibold'
+                    style={{
+                      backgroundColor: colors.light.primary,
+                      color: '#fff',
+                    }}
+                  >
+                    Botón Primario
+                  </button>
+                  <button
+                    className='w-full rounded-md py-2 text-xs font-semibold'
+                    style={{
+                      backgroundColor: colors.light.accent,
+                      color: '#fff',
+                    }}
+                  >
+                    Botón Acento
+                  </button>
 
-              <div>
-                <Label>{t.settings.backgroundColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.background}
-                    onChange={(e) =>
-                      handleColorChange('light', 'background', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.background}
-                    onChange={(e) =>
-                      handleColorChange('light', 'background', e.target.value)
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Color de Fondo Secundario</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.backgroundSecondary}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'light',
-                        'backgroundSecondary',
-                        e.target.value
-                      )
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.backgroundSecondary}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'light',
-                        'backgroundSecondary',
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Color de Fondo Acento</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.light.backgroundAccent}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'light',
-                        'backgroundAccent',
-                        e.target.value
-                      )
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.light.backgroundAccent}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'light',
-                        'backgroundAccent',
-                        e.target.value
-                      )
-                    }
-                  />
+                  <div
+                    className='rounded-md p-2 mt-2'
+                    style={{
+                      backgroundColor: colors.light.backgroundAccent,
+                    }}
+                  >
+                    <div className='font-semibold text-[11px] mb-1'>
+                      Tarjeta de Ejemplo
+                    </div>
+                    <div className='text-[10px] opacity-80'>
+                      Texto con color principal configurado.
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
+          {/* DARK THEME SECTION */}
           <div className='border-t pt-6 dark:border-gray-700'>
             <h3 className='text-lg font-semibold mb-4 dark:text-white'>
               {t.settings.darkModeColors}
             </h3>
-            <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-              <div>
-                <Label>{t.settings.primaryColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.primary}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'primary', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.primary}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'primary', e.target.value)
-                    }
-                  />
-                </div>
+
+            <div className='grid md:grid-cols-2 gap-6'>
+              {/* Color Pickers - thinner layout */}
+              <div className='space-y-3'>
+                {(
+                  [
+                    ['primary', t.settings.primaryColor],
+                    ['accent', t.settings.accentColor],
+                    ['text', t.settings.textColor],
+                    ['background', t.settings.backgroundColor],
+                    ['backgroundSecondary', 'Color Fondo Secundario'],
+                    ['backgroundAccent', 'Color Fondo Acento'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key}>
+                    <Label>{label}</Label>
+                    <div className='flex items-center gap-2 mt-1'>
+                      <input
+                        type='color'
+                        value={colors.dark[key]}
+                        onChange={(e) =>
+                          handleColorChange('dark', key, e.target.value)
+                        }
+                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600'
+                      />
+                      <Input
+                        type='text'
+                        value={colors.dark[key]}
+                        onChange={(e) =>
+                          handleColorChange('dark', key, e.target.value)
+                        }
+                        className='flex-1'
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div>
-                <Label>{t.settings.accentColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.accent}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'accent', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.accent}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'accent', e.target.value)
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>{t.settings.textColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.text}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'text', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.text}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'text', e.target.value)
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>{t.settings.backgroundColor}</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.background}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'background', e.target.value)
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.background}
-                    onChange={(e) =>
-                      handleColorChange('dark', 'background', e.target.value)
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Color de Fondo Secundario</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.backgroundSecondary}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'dark',
-                        'backgroundSecondary',
-                        e.target.value
-                      )
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.backgroundSecondary}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'dark',
-                        'backgroundSecondary',
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label>Color de Fondo Acento</Label>
-                <div className='flex items-center gap-2 mt-2'>
-                  <input
-                    type='color'
-                    value={colors.dark.backgroundAccent}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'dark',
-                        'backgroundAccent',
-                        e.target.value
-                      )
-                    }
-                    className='w-16 h-16 rounded cursor-pointer'
-                  />
-                  <Input
-                    type='text'
-                    value={colors.dark.backgroundAccent}
-                    onChange={(e) =>
-                      handleColorChange(
-                        'dark',
-                        'backgroundAccent',
-                        e.target.value
-                      )
-                    }
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className='border-t pt-6 dark:border-gray-700'>
-            <h3 className='text-lg font-semibold mb-4 dark:text-white'>
-              {t.settings.preview}
-            </h3>
-            <div className='grid grid-cols-2 gap-4'>
+              {/* Live Preview */}
               <div
-                className='p-6 rounded-lg'
-                style={{ backgroundColor: colors[theme].primary }}
+                className='rounded-lg border border-gray-700 shadow-sm overflow-hidden flex flex-col text-xs'
+                style={{
+                  backgroundColor: colors.dark.background,
+                  color: colors.dark.text,
+                }}
               >
-                <div className='text-white font-bold text-lg mb-2'>
-                  {t.settings.primaryColorPreview}
+                <div
+                  className='px-3 py-2 font-semibold flex justify-between items-center'
+                  style={{ backgroundColor: colors.dark.backgroundSecondary }}
+                >
+                  <span>Encabezado</span>
+                  <span
+                    className='rounded-full px-2 py-1 text-[10px]'
+                    style={{
+                      backgroundColor: colors.dark.primary,
+                      color: '#fff',
+                    }}
+                  >
+                    Badge
+                  </span>
                 </div>
-              </div>
-              <div
-                className='p-6 rounded-lg'
-                style={{ backgroundColor: colors[theme].accent }}
-              >
-                <div className='text-white font-bold text-lg mb-2'>
-                  {t.settings.accentColorPreview}
+
+                <div className='p-3 space-y-2'>
+                  <button
+                    className='w-full rounded-md py-2 text-xs font-semibold'
+                    style={{
+                      backgroundColor: colors.dark.primary,
+                      color: '#fff',
+                    }}
+                  >
+                    Botón Primario
+                  </button>
+                  <button
+                    className='w-full rounded-md py-2 text-xs font-semibold'
+                    style={{
+                      backgroundColor: colors.dark.accent,
+                      color: '#fff',
+                    }}
+                  >
+                    Botón Acento
+                  </button>
+
+                  <div
+                    className='rounded-md p-2 mt-2'
+                    style={{
+                      backgroundColor: colors.dark.backgroundAccent,
+                    }}
+                  >
+                    <div className='font-semibold text-[11px] mb-1'>
+                      Tarjeta de Ejemplo
+                    </div>
+                    <div className='text-[10px] opacity-80'>
+                      Texto con color principal configurado.
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
           <div className='flex gap-3 pt-4'>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving} variant='secondary'>
               {saving ? t.settings.saving : t.settings.saveChanges}
             </Button>
             <Button onClick={handleReset} variant='secondary'>
               {t.settings.resetToDefault}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className='mb-6'>
-        <CardHeader>
-          <CardTitle className='flex items-center gap-2'>
-            <Lock size={24} />
-            Configuración del Punto de Venta
-          </CardTitle>
-          <CardDescription>
-            Controla cómo se comporta la organización de productos en el punto
-            de venta
-          </CardDescription>
-        </CardHeader>
-        <CardContent className='space-y-4'>
-          <div
-            className='flex items-start justify-between p-4 rounded-lg'
-            style={{ backgroundColor: 'var(--color-background-accent)' }}
-          >
-            <div className='flex-1'>
-              <div
-                className='font-semibold mb-1'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Bloquear diseño del POS
-              </div>
-              <div
-                className='text-sm opacity-70'
-                style={{ color: 'var(--color-text)' }}
-              >
-                {posLayoutLocked
-                  ? 'Los productos no se pueden reorganizar. Desbloquea para permitir cambios en el orden. Las posiciones actuales se mantendrán.'
-                  : 'Los productos se pueden reorganizar arrastrándolos. Las posiciones se guardan automáticamente. Bloquea para evitar cambios accidentales durante las ventas.'}
-              </div>
-            </div>
-            <Button
-              onClick={handlePosLayoutLockToggle}
-              variant={posLayoutLocked ? 'default' : 'secondary'}
-              className='ml-4'
-            >
-              {posLayoutLocked ? (
-                <>
-                  <Lock size={16} className='mr-2' />
-                  Bloqueado
-                </>
-              ) : (
-                <>
-                  <Lock size={16} className='mr-2' />
-                  Desbloqueado
-                </>
-              )}
             </Button>
           </div>
         </CardContent>

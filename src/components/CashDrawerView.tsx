@@ -18,6 +18,7 @@ import { CashMovement, Sale, SaleItem } from '../lib/indexeddb';
 import { translations as t } from '../lib/translations';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { Button } from './ui/button';
+import { useTheme } from '../contexts/ThemeContext';
 
 export function CashDrawerView() {
   const {
@@ -28,6 +29,7 @@ export function CashDrawerView() {
     resetCashDrawer,
     loading,
   } = useCashDrawer();
+  const { theme } = useTheme();
   const { getSaleById, getSaleItems } = useSales();
   const [editingBill, setEditingBill] = useState<number | null>(null);
   const [newQuantity, setNewQuantity] = useState('');
@@ -344,7 +346,10 @@ export function CashDrawerView() {
               <button
                 onClick={() => handleQuickAdjust(bill.denomination, 1)}
                 className='flex-1 py-2 px-3 rounded text-white hover:opacity-90 flex items-center justify-center gap-1'
-                style={{ backgroundColor: 'var(--color-primary)' }}
+                style={{
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'var(--color-on-primary)',
+                }}
               >
                 <Plus size={16} />
                 {t.cashDrawer.add}
@@ -354,17 +359,29 @@ export function CashDrawerView() {
         ))}
       </div>
 
-      <div className='mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6'>
+      <div
+        className='mt-6 rounded-lg p-4 mb-6 border transition-colors'
+        style={{
+          backgroundColor: 'var(--color-background-accent)',
+          borderColor: 'var(--color-accent)',
+        }}
+      >
         <div className='flex items-start gap-3'>
           <RefreshCw
             size={20}
-            className='text-blue-600 dark:text-blue-400 mt-0.5'
+            className='mt-0.5'
+            style={{ color: 'var(--color-accent)' }}
           />
-          <div className='text-sm text-blue-700 dark:text-blue-400'>
-            <div className='font-semibold mb-1'>
+          <div className='text-sm' style={{ color: 'var(--color-text)' }}>
+            <div
+              className='font-semibold mb-1'
+              style={{ color: 'var(--color-accent)' }}
+            >
               {t.cashDrawer.automaticUpdates}
             </div>
-            <div>{t.cashDrawer.automaticUpdatesDesc}</div>
+            <div style={{ opacity: 0.9 }}>
+              {t.cashDrawer.automaticUpdatesDesc}
+            </div>
           </div>
         </div>
       </div>
@@ -373,9 +390,10 @@ export function CashDrawerView() {
         className='rounded-lg shadow-md'
         style={{ backgroundColor: 'var(--color-background-secondary)' }}
       >
+        {/* Header button */}
         <button
           onClick={() => setShowMovements(!showMovements)}
-          className='w-full p-6 flex items-center justify-between hover:opacity-70 transition-colors'
+          className='w-full p-6 flex items-center justify-between hover:opacity-80 transition-opacity'
         >
           <div className='flex items-center gap-3'>
             <History size={24} style={{ color: 'var(--color-primary)' }} />
@@ -387,41 +405,59 @@ export function CashDrawerView() {
                 {t.cashDrawer.movementsLog}
               </h2>
               <p
-                className='text-sm opacity-60'
-                style={{ color: 'var(--color-text)' }}
+                className='text-sm'
+                style={{ color: 'var(--color-text)', opacity: 0.7 }}
               >
                 {t.cashDrawer.movementsLogDesc}
               </p>
             </div>
           </div>
           {showMovements ? (
-            <ChevronUp size={24} className='dark:text-white' />
+            <ChevronUp size={24} style={{ color: 'var(--color-text)' }} />
           ) : (
-            <ChevronDown size={24} className='dark:text-white' />
+            <ChevronDown size={24} style={{ color: 'var(--color-text)' }} />
           )}
         </button>
 
         {showMovements && (
-          <div className='border-t dark:border-gray-700 p-6'>
+          <div
+            className='border-t p-6'
+            style={{ borderColor: 'var(--color-background-accent)' }}
+          >
             {loadingMovements ? (
-              <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+              <div
+                className='text-center py-8'
+                style={{ color: 'var(--color-text)', opacity: 0.6 }}
+              >
                 {t.cashDrawer.loading}
               </div>
             ) : movements.length === 0 ? (
-              <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+              <div
+                className='text-center py-8'
+                style={{ color: 'var(--color-text)', opacity: 0.6 }}
+              >
                 {t.cashDrawer.noMovements}
               </div>
             ) : (
               <>
+                {/* Filters */}
                 <div className='mb-4 grid grid-cols-1 md:grid-cols-2 gap-3'>
                   <div>
-                    <label className='block text-sm font-medium mb-2 dark:text-white'>
+                    <label
+                      className='block text-sm font-medium mb-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
                       Filtrar por Tipo
                     </label>
                     <select
                       value={filterMovementType}
                       onChange={(e) => setFilterMovementType(e.target.value)}
-                      className='w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white'
+                      className='w-full px-3 py-2 rounded-lg border'
+                      style={{
+                        backgroundColor: 'var(--color-background)',
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-background-accent)',
+                      }}
                     >
                       <option value='all'>Todos</option>
                       <option value='sale'>Venta</option>
@@ -432,7 +468,10 @@ export function CashDrawerView() {
                     </select>
                   </div>
                   <div>
-                    <label className='block text-sm font-medium mb-2 dark:text-white'>
+                    <label
+                      className='block text-sm font-medium mb-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
                       Filtrar por Billete
                     </label>
                     <select
@@ -440,7 +479,12 @@ export function CashDrawerView() {
                       onChange={(e) =>
                         setFilterBillDenomination(e.target.value)
                       }
-                      className='w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white'
+                      className='w-full px-3 py-2 rounded-lg border'
+                      style={{
+                        backgroundColor: 'var(--color-background)',
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-background-accent)',
+                      }}
                     >
                       <option value='all'>Todos</option>
                       {bills.map((bill) => (
@@ -454,8 +498,13 @@ export function CashDrawerView() {
                     </select>
                   </div>
                 </div>
+
+                {/* Filtered results */}
                 {filteredMovements.length === 0 ? (
-                  <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+                  <div
+                    className='text-center py-8'
+                    style={{ color: 'var(--color-text)', opacity: 0.6 }}
+                  >
                     No hay movimientos que coincidan con los filtros
                   </div>
                 ) : (
@@ -463,7 +512,10 @@ export function CashDrawerView() {
                     {filteredMovements.map((movement) => (
                       <div
                         key={movement.id}
-                        className='p-4 rounded-lg bg-gray-50 dark:bg-gray-700'
+                        className='p-4 rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                        }}
                       >
                         <div className='flex items-start justify-between mb-2'>
                           <div className='flex-1'>
@@ -475,18 +527,32 @@ export function CashDrawerView() {
                               >
                                 {getMovementTypeLabel(movement.movement_type)}
                               </span>
+
                               {movement.sale_id && (
                                 <button
                                   onClick={() =>
                                     handleViewSale(movement.sale_id!)
                                   }
-                                  className='text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer'
+                                  className='text-xs px-2 py-0 rounded border transition-colors cursor-pointer'
+                                  style={{
+                                    borderColor: 'var(--color-accent)',
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-accent)',
+                                  }}
                                 >
                                   ID: {movement.sale_id.slice(0, 8)}
                                 </button>
                               )}
                             </div>
-                            <div className='text-sm text-gray-600 dark:text-gray-300'>
+
+                            <div
+                              className='text-sm'
+                              style={{
+                                color: 'var(--color-text)',
+                                opacity: 0.9,
+                              }}
+                            >
                               {movement.bills_in &&
                                 Object.keys(movement.bills_in).length > 0 && (
                                   <div className='flex flex-wrap gap-1 mt-2'>
@@ -495,7 +561,14 @@ export function CashDrawerView() {
                                       .map(([denom, qty]) => (
                                         <span
                                           key={denom}
-                                          className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded'
+                                          className={`
+    inline-flex items-center text-xs font-semibold px-2 py-1 rounded-full
+    ${
+      theme === 'light'
+        ? 'bg-emerald-800 text-emerald-100 ring-1 ring-emerald-900'
+        : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
+    }
+  `}
                                         >
                                           {formatNumber(qty)}x{' '}
                                           {formatPrice(Number(denom))}
@@ -503,6 +576,7 @@ export function CashDrawerView() {
                                       ))}
                                   </div>
                                 )}
+
                               {movement.bills_out &&
                                 Object.keys(movement.bills_out).length > 0 && (
                                   <div className='flex flex-wrap gap-1 mt-2'>
@@ -511,7 +585,14 @@ export function CashDrawerView() {
                                       .map(([denom, qty]) => (
                                         <span
                                           key={denom}
-                                          className='text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded'
+                                          className={`
+    inline-flex items-center text-xs font-semibold px-2 py-1 rounded-full
+    ${
+      theme === 'light'
+        ? 'bg-rose-800 text-rose-100 ring-1 ring-rose-900'
+        : 'bg-rose-100 text-rose-800 ring-1 ring-rose-200'
+    }
+  `}
                                         >
                                           {formatNumber(qty)}x{' '}
                                           {formatPrice(Number(denom))}
@@ -520,13 +601,24 @@ export function CashDrawerView() {
                                   </div>
                                 )}
                             </div>
+
                             {movement.notes && (
-                              <div className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                              <div
+                                className='text-xs mt-1'
+                                style={{
+                                  color: 'var(--color-text)',
+                                  opacity: 0.6,
+                                }}
+                              >
                                 {movement.notes}
                               </div>
                             )}
                           </div>
-                          <div className='text-right text-xs text-gray-500 dark:text-gray-400'>
+
+                          <div
+                            className='text-right text-xs'
+                            style={{ color: 'var(--color-text)', opacity: 0.6 }}
+                          >
                             {formatDate(movement.created_at)}
                           </div>
                         </div>
@@ -547,8 +639,11 @@ export function CashDrawerView() {
             style={{ backgroundColor: 'var(--color-background-secondary)' }}
           >
             <div
-              className='sticky top-0 z-10 flex items-center justify-between p-6 border-b dark:border-gray-700'
-              style={{ backgroundColor: 'var(--color-background-secondary)' }}
+              className='sticky top-0 z-10 flex items-center justify-between p-6 border-b'
+              style={{
+                backgroundColor: 'var(--color-background-secondary)',
+                borderColor: 'var(--color-background-accent)',
+              }}
             >
               <h2
                 className='text-2xl font-bold'
@@ -558,9 +653,20 @@ export function CashDrawerView() {
               </h2>
               <button
                 onClick={() => setShowSaleModal(false)}
-                className='flex justify-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors'
+                className='flex justify-center p-2 rounded-lg transition-colors'
+                style={{
+                  color: 'var(--color-text)',
+                }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                    'var(--color-background-accent)';
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                    'transparent';
+                }}
               >
-                <X size={24} style={{ color: 'var(--color-text)' }} />
+                <X size={24} />
               </button>
             </div>
 
@@ -569,14 +675,15 @@ export function CashDrawerView() {
                 className='mb-6 p-4 rounded-lg'
                 style={{
                   backgroundColor: 'var(--color-primary)',
-                  color: 'white',
+                  color: 'var(--color-on-primary)',
                 }}
               >
                 <div className='text-sm opacity-90 mb-1'>Venta</div>
                 <div className='text-2xl font-bold mb-3'>
                   #
                   {parseInt(
-                    selectedSale.sale_number.replace(/^S-/, '')
+                    selectedSale.sale_number.replace(/^S-/, ''),
+                    10
                   ).toLocaleString('es-AR')}
                 </div>
                 <div className='grid grid-cols-2 gap-4 text-sm'>
@@ -638,7 +745,10 @@ export function CashDrawerView() {
                 </div>
               </div>
 
-              <div className='border-t pt-4 space-y-2'>
+              <div
+                className='border-t pt-4 space-y-2'
+                style={{ borderColor: 'var(--color-background-accent)' }}
+              >
                 <div
                   className='flex justify-between text-lg'
                   style={{ color: 'var(--color-text)' }}
@@ -648,6 +758,7 @@ export function CashDrawerView() {
                     {formatPrice(selectedSale.total_amount)}
                   </span>
                 </div>
+
                 {selectedSale.cash_received && (
                   <>
                     <div className='pt-2'>
@@ -662,6 +773,7 @@ export function CashDrawerView() {
                           {formatPrice(selectedSale.cash_received)}
                         </span>
                       </div>
+
                       {selectedSale.bills_received &&
                         Object.keys(selectedSale.bills_received).length > 0 && (
                           <div className='ml-4 mt-1 flex flex-wrap gap-1'>
@@ -670,7 +782,14 @@ export function CashDrawerView() {
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded'
+                                  className={`
+                            inline-flex items-center text-xs font-semibold px-2 py-1 rounded-full
+                            ${
+                              theme === 'light'
+                                ? 'bg-emerald-800 text-emerald-100 ring-1 ring-emerald-900'
+                                : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
+                            }
+  `}
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}
@@ -681,12 +800,16 @@ export function CashDrawerView() {
                     </div>
 
                     <div className='pt-2'>
-                      <div className='flex justify-between text-sm dark:text-gray-300 mb-2'>
+                      <div
+                        className='flex justify-between text-sm mb-2'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         <span className='font-semibold'>Cambio Entregado:</span>
                         <span className='font-bold'>
                           {formatPrice(selectedSale.change_given || 0)}
                         </span>
                       </div>
+
                       {selectedSale.bills_change &&
                         Object.keys(selectedSale.bills_change).length > 0 && (
                           <div className='ml-4 mt-1 flex flex-wrap gap-1'>
@@ -695,7 +818,13 @@ export function CashDrawerView() {
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className='text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded'
+                                  className={`
+                                    inline-flex items-center text-xs font-semibold px-2 py-1 rounded-full
+                                    ${
+                                      theme === 'light'
+                                        ? 'bg-rose-800 text-rose-100 ring-1 ring-rose-900'
+                                        : 'bg-rose-100 text-rose-800 ring-1 ring-rose-200'
+                                    }`}
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}

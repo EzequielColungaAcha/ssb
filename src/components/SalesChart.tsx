@@ -217,7 +217,10 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
               }`}
               style={
                 chartMode === 'sales'
-                  ? { backgroundColor: 'var(--color-primary)' }
+                  ? {
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }
                   : { color: 'var(--color-text)' }
               }
             >
@@ -230,7 +233,10 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
               }`}
               style={
                 chartMode === 'products'
-                  ? { backgroundColor: 'var(--color-primary)' }
+                  ? {
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }
                   : { color: 'var(--color-text)' }
               }
             >
@@ -250,7 +256,10 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                 }`}
                 style={
                   timeFrame === btn.value
-                    ? { backgroundColor: 'var(--color-primary)' }
+                    ? {
+                        backgroundColor: 'var(--color-primary)',
+                        color: 'var(--color-on-primary)',
+                      }
                     : { color: 'var(--color-text)' }
                 }
               >

@@ -7,6 +7,8 @@ import {
   RotateCcw,
   Undo,
   GripVertical,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -91,7 +93,7 @@ function SortableProductItem({
         className='w-full p-6 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 hover:scale-105'
         style={{
           backgroundColor: 'var(--color-primary)',
-          color: 'white',
+          color: 'var(--color-on-primary)',
         }}
       >
         <div className='text-lg font-bold mb-2'>{product.name}</div>
@@ -606,6 +608,50 @@ export function POSView() {
     }
   }, []);
 
+  const toggleLayoutLock = useCallback(async () => {
+    try {
+      await db.init();
+      const newLockState = !isLayoutLocked;
+
+      // If locking, save current product order
+      if (newLockState) {
+        await saveProductOrder();
+      }
+
+      const existingSettings = (await db.get<AppSettings>(
+        'app_settings',
+        'default'
+      )) || {
+        id: 'default',
+        pos_layout_locked: false,
+        category_order: [], // optional default
+        updated_at: new Date().toISOString(),
+      };
+
+      const updatedSettings: AppSettings = {
+        ...existingSettings,
+        pos_layout_locked: newLockState,
+        category_order:
+          categoryOrder.length > 0
+            ? categoryOrder
+            : existingSettings.category_order,
+        updated_at: new Date().toISOString(),
+      };
+
+      await db.put('app_settings', updatedSettings);
+      setIsLayoutLocked(newLockState);
+
+      toast.success(
+        newLockState
+          ? 'Diseño de POS bloqueado. No se podrán mover productos hasta desbloquear.'
+          : 'Diseño de POS desbloqueado. Ahora puedes reorganizar los productos.'
+      );
+    } catch (error) {
+      console.error('Error toggling POS layout lock:', error);
+      toast.error('Error al cambiar el estado del bloqueo');
+    }
+  }, [isLayoutLocked, categoryOrder, saveProductOrder]);
+
   useEffect(() => {
     loadStocks();
   }, [loadStocks]);
@@ -613,23 +659,8 @@ export function POSView() {
   useEffect(() => {
     loadSettings();
     loadNextSaleNumber();
-
-    const handleLockChange = (event: Event) => {
-      const customEvent = event as CustomEvent<{ locked: boolean }>;
-      setIsLayoutLocked(customEvent.detail.locked);
-    };
-
-    const handleSaveOrder = () => {
-      saveProductOrder();
-    };
-
-    window.addEventListener('pos-layout-lock-changed', handleLockChange);
-    window.addEventListener('pos-layout-save-order', handleSaveOrder);
-    return () => {
-      window.removeEventListener('pos-layout-lock-changed', handleLockChange);
-      window.removeEventListener('pos-layout-save-order', handleSaveOrder);
-    };
-  }, [loadSettings, loadNextSaleNumber, saveProductOrder]);
+    // we no longer use global events for lock/save
+  }, [loadSettings, loadNextSaleNumber]);
 
   useEffect(() => {
     const sorted = [...products].sort((a, b) => {
@@ -651,7 +682,23 @@ export function POSView() {
         className='flex h-screen'
         style={{ backgroundColor: 'var(--color-background)' }}
       >
-        <div className='flex-1 p-6 overflow-auto scrollbar-hide'>
+        <div className='flex-1 p-6 overflow-auto scrollbar-hide relative'>
+          <button
+            type='button'
+            onClick={toggleLayoutLock}
+            className='absolute top-2 right-2 z-20 p-2 transition-transform'
+            aria-label={
+              isLayoutLocked
+                ? 'Desbloquear diseño del POS'
+                : 'Bloquear diseño del POS'
+            }
+          >
+            {isLayoutLocked ? (
+              <Lock size={20} style={{ color: 'var(--color-accent)' }} />
+            ) : (
+              <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+            )}
+          </button>
           <SortableContext
             items={categories.map((cat) => `category-${cat}`)}
             disabled={isLayoutLocked}
@@ -834,15 +881,17 @@ export function POSView() {
                         setChangeBreakdown(null);
                         setBillHistory([]);
                       }}
-                      className={`py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
-                        paymentMethod === 'cash'
-                          ? 'text-white'
-                          : 'bg-gray-200 dark:bg-gray-700 dark:text-white'
-                      }`}
+                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
                       style={
                         paymentMethod === 'cash'
-                          ? { backgroundColor: 'var(--color-primary)' }
-                          : undefined
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
                       }
                     >
                       <Banknote size={20} />
@@ -850,15 +899,17 @@ export function POSView() {
                     </button>
                     <button
                       onClick={() => setPaymentMethod('online')}
-                      className={`py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
-                        paymentMethod === 'online'
-                          ? 'text-white'
-                          : 'bg-gray-200 dark:bg-gray-700 dark:text-white'
-                      }`}
+                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
                       style={
                         paymentMethod === 'online'
-                          ? { backgroundColor: 'var(--color-primary)' }
-                          : undefined
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
                       }
                     >
                       <CreditCard size={20} />
@@ -878,7 +929,13 @@ export function POSView() {
                           {billHistory.length > 0 && (
                             <button
                               onClick={undoLastBill}
-                              className='text-xs px-2 py-1 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 hover:bg-orange-200 dark:hover:bg-orange-900/50 flex items-center gap-1'
+                              className='text-xs px-2 py-1 rounded border flex items-center gap-1'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-secondary)',
+                                borderColor: 'var(--color-accent)',
+                                color: 'var(--color-accent)',
+                              }}
                             >
                               <Undo size={12} />
                               Deshacer
@@ -887,7 +944,12 @@ export function POSView() {
                           {cashReceived > 0 && (
                             <button
                               onClick={resetCash}
-                              className='text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-700 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600 flex items-center gap-1'
+                              className='text-xs px-2 py-1 rounded flex items-center gap-1'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-accent)',
+                                color: 'var(--color-text)',
+                              }}
                             >
                               <RotateCcw size={12} />
                               Reiniciar
@@ -909,8 +971,17 @@ export function POSView() {
                       </div>
 
                       {changeBreakdown && change > 0 && (
-                        <div className='mt-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg'>
-                          <div className='text-sm font-semibold mb-2 text-green-700 dark:text-green-400'>
+                        <div
+                          className='mt-3 p-3 rounded-lg border'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                            borderColor: 'var(--color-accent)',
+                          }}
+                        >
+                          <div
+                            className='text-sm font-semibold mb-2'
+                            style={{ color: 'var(--color-accent)' }}
+                          >
                             Entregar cambio:
                           </div>
                           <div className='space-y-1'>
@@ -932,8 +1003,17 @@ export function POSView() {
                       {change > 0 &&
                         !changeBreakdown &&
                         cashReceived >= total && (
-                          <div className='mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg'>
-                            <div className='text-sm text-red-700 dark:text-red-400'>
+                          <div
+                            className='mt-3 p-3 rounded-lg border'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              borderColor: 'var(--color-primary)',
+                            }}
+                          >
+                            <div
+                              className='text-sm'
+                              style={{ color: 'var(--color-primary)' }}
+                            >
                               No se puede dar cambio exacto con los billetes
                               disponibles
                             </div>
@@ -942,7 +1022,10 @@ export function POSView() {
                     </div>
 
                     <div className='mb-4'>
-                      <div className='text-xs text-gray-500 dark:text-gray-400 mb-2'>
+                      <div
+                        className='text-xs mb-2'
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         Agregar billetes:
                       </div>
                       <div className='grid grid-cols-5 gap-2'>
@@ -950,7 +1033,11 @@ export function POSView() {
                           <button
                             key={bill}
                             onClick={() => addCash(bill)}
-                            className='py-2 px-3 rounded bg-gray-200 dark:bg-gray-700 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600 font-semibold'
+                            className='py-2 px-3 rounded font-semibold'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }}
                           >
                             +{formatPrice(bill)}
                           </button>
@@ -959,11 +1046,23 @@ export function POSView() {
                     </div>
                   </div>
                 ) : (
-                  <div className='mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg'>
-                    <div className='text-center text-blue-700 dark:text-blue-400'>
+                  <div
+                    className='mb-4 p-4 rounded-lg border'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                      borderColor: 'var(--color-accent)',
+                    }}
+                  >
+                    <div
+                      className='text-center'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
                       <CreditCard size={32} className='mx-auto mb-2' />
                       <div className='font-semibold'>Pago en Línea</div>
-                      <div className='text-sm mt-1'>
+                      <div
+                        className='text-sm mt-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         El cliente pagará electrónicamente
                       </div>
                     </div>
@@ -974,14 +1073,21 @@ export function POSView() {
                   <button
                     onClick={completeSale}
                     disabled={!canComplete() || processing}
-                    className='w-full py-3 rounded-lg text-white font-bold disabled:opacity-50 disabled:cursor-not-allowed'
-                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed'
+                    style={{
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }}
                   >
                     {processing ? 'Procesando...' : 'Completar Venta'}
                   </button>
                   <button
                     onClick={cancelPayment}
-                    className='w-full py-3 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-bold'
+                    className='w-full py-3 rounded-lg font-bold'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                    }}
                   >
                     Cancelar
                   </button>
@@ -999,7 +1105,7 @@ export function POSView() {
               className='w-full p-6 rounded-lg'
               style={{
                 backgroundColor: 'var(--color-primary)',
-                color: 'white',
+                color: 'var(--color-on-primary)',
               }}
             >
               <div className='text-lg font-bold mb-2'>{activeProduct.name}</div>

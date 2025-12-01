@@ -215,6 +215,7 @@ function AppContent() {
                     ? {
                         backgroundColor: 'var(--color-primary)',
                         minHeight: '56px',
+                        color: 'var(--color-on-primary)',
                       }
                     : { color: 'var(--color-text)', minHeight: '56px' }
                 }

@@ -614,7 +614,10 @@ export function MetricsView() {
           </h2>
           <div className='space-y-4'>
             {mostProfitableProducts.length === 0 ? (
-              <div className='text-center text-gray-400 py-8'>
+              <div
+                className='text-center py-8'
+                style={{ color: 'var(--color-text)', opacity: 0.6 }}
+              >
                 Aún no hay ventas de productos
               </div>
             ) : (
@@ -626,9 +629,10 @@ export function MetricsView() {
                 >
                   <div className='flex items-center gap-3 mb-2'>
                     <div
-                      className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
+                      className='w-8 h-8 rounded-full flex items-center justify-center font-bold'
                       style={{
-                        backgroundColor: 'var(--color-background-secondary)',
+                        backgroundColor: 'var(--color-primary)',
+                        color: 'var(--color-on-primary)',
                       }}
                     >
                       {index + 1}
@@ -686,7 +690,10 @@ export function MetricsView() {
           </h2>
           <div className='space-y-4'>
             {topProducts.length === 0 ? (
-              <div className='text-center text-gray-400 py-8'>
+              <div
+                className='text-center py-8'
+                style={{ color: 'var(--color-text)', opacity: 0.6 }}
+              >
                 Aún no hay ventas de productos
               </div>
             ) : (
@@ -698,9 +705,10 @@ export function MetricsView() {
                 >
                   <div className='flex items-center gap-3 mb-2'>
                     <div
-                      className='w-8 h-8 rounded-full flex items-center justify-center text-white font-bold'
+                      className='w-8 h-8 rounded-full flex items-center justify-center font-bold'
                       style={{
-                        backgroundColor: 'var(--color-background-secondary)',
+                        backgroundColor: 'var(--color-primary)',
+                        color: 'var(--color-on-primary)',
                       }}
                     >
                       {index + 1}
@@ -761,7 +769,10 @@ export function MetricsView() {
             style={{ maxHeight: '500px' }}
           >
             {allSoldProducts.length === 0 ? (
-              <div className='text-center text-gray-400 py-8'>
+              <div
+                className='text-center py-8'
+                style={{ color: 'var(--color-text)', opacity: 0.6 }}
+              >
                 Aún no hay ventas de productos
               </div>
             ) : (
@@ -918,42 +929,69 @@ export function MetricsView() {
                     }}
                   >
                     <div className='flex justify-between items-center mb-2'>
-                      <div className='font-semibold capitalize dark:text-white'>
+                      <div
+                        className='font-semibold capitalize'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {category}
                       </div>
-                      <div className='text-sm text-gray-500 dark:text-gray-400'>
+                      <div
+                        className='text-sm'
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         {stats.productCount} productos
                       </div>
                     </div>
+
                     <div className='flex justify-between text-sm'>
-                      <span className='text-gray-600 dark:text-gray-300'>
+                      <span
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         Unidades Totales:
                       </span>
-                      <span className='font-bold dark:text-white'>
+                      <span
+                        className='font-bold'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {formatNumber(stats.totalStock)}
                       </span>
                     </div>
+
                     <div className='flex justify-between text-sm'>
-                      <span className='text-gray-600 dark:text-gray-300'>
+                      <span
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         Costo Total:
                       </span>
-                      <span className='font-bold dark:text-white'>
+                      <span
+                        className='font-bold'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {formatPrice(stats.totalCost)}
                       </span>
                     </div>
+
                     <div className='flex justify-between text-sm'>
-                      <span className='text-gray-600 dark:text-gray-300'>
+                      <span
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         Valor de Venta:
                       </span>
-                      <span className='font-bold dark:text-white'>
+                      <span
+                        className='font-bold'
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {formatPrice(stats.totalValue)}
                       </span>
                     </div>
+
                     <div
                       className='flex justify-between text-sm mt-2 pt-2 border-t'
                       style={{ borderColor: 'var(--color-primary)' }}
                     >
-                      <span className='text-gray-600 dark:text-gray-300'>
+                      <span
+                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
+                      >
                         Ganancia Potencial:
                       </span>
                       <span

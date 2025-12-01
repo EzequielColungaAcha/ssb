@@ -246,7 +246,10 @@ export function ProductsView() {
           <button
             onClick={() => setShowForm(true)}
             className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
-            style={{ backgroundColor: 'var(--color-primary)' }}
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              color: 'var(--color-on-primary)',
+            }}
           >
             <Plus size={20} />
             Añadir Producto
@@ -554,7 +557,10 @@ export function ProductsView() {
               <button
                 type='submit'
                 className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
-                style={{ backgroundColor: 'var(--color-primary)' }}
+                style={{
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'var(--color-on-primary)',
+                }}
               >
                 <Save size={18} />
                 {editingId ? 'Actualizar' : 'Guardar'}
@@ -615,7 +621,10 @@ export function ProductsView() {
                   }}
                   title='Usa Materia Prima'
                 >
-                  <Package size={16} className='text-white' />
+                  <Package
+                    size={16}
+                    style={{ color: 'var(--color-on-primary)' }}
+                  />
                 </div>
               )}
               <div className='mb-3'>

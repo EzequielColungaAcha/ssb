@@ -95,7 +95,7 @@ export function SalesView() {
                         : 'var(--color-background-accent)',
                     color:
                       selectedSale?.id === sale.id
-                        ? 'white'
+                        ? 'var(--color-on-primary)'
                         : 'var(--color-text)',
                   }}
                 >
@@ -106,7 +106,7 @@ export function SalesView() {
                         style={{
                           color:
                             selectedSale?.id === sale.id
-                              ? 'white'
+                              ? 'var(--color-on-primary)'
                               : 'var(--color-text)',
                         }}
                       >
@@ -148,7 +148,7 @@ export function SalesView() {
                 className='mb-6 p-4 rounded-lg'
                 style={{
                   backgroundColor: 'var(--color-primary)',
-                  color: 'white',
+                  color: 'var(--color-on-primary)',
                 }}
               >
                 <div className='text-sm opacity-90 mb-1'>Venta</div>

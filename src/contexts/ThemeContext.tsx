@@ -12,26 +12,47 @@ interface ThemeContextType {
   isLoading: boolean;
 }
 
+// 🔆 Default palettes optimized for:
+// - Light: visibility on sunny day
+// - Dark: modern, low-strain deep slate
 const defaultThemeConfig: ThemeConfig = {
   light: {
-    primary: '#dc2626',
-    accent: '#ea580c',
-    text: '#111827',
-    background: '#f3f4f6',
-    backgroundSecondary: '#ffffff',
-    backgroundAccent: '#e5e7eb',
+    primary: '#D7191C', // bright red, high visibility
+    accent: '#0077CC', // strong blue accent
+    text: '#1A1A1A', // very dark gray for better readability than pure black
+    background: '#FAFAF7', // warm off-white (less glare)
+    backgroundSecondary: '#FFFFFF',
+    backgroundAccent: '#E5E7EB',
   },
   dark: {
-    primary: '#ef4444',
-    accent: '#fb923c',
-    text: '#f9fafb',
-    background: '#0f172a',
-    backgroundSecondary: '#1e293b',
-    backgroundAccent: '#334155',
+    primary: '#3B82F6', // blue-500
+    accent: '#10B981', // emerald-500
+    text: '#E5E7EB', // gray-200
+    background: '#0F172A', // slate-900
+    backgroundSecondary: '#1E293B', // slate-800
+    backgroundAccent: '#334155', // slate-700
   },
 };
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
+
+// 🔍 Small helper: returns black or white depending on background luminance
+function getReadableTextColor(hex: string): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return '#FFFFFF';
+
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+
+  const [R, G, B] = [r, g, b].map((v) =>
+    v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  );
+
+  const luminance = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  // Simple WCAG-inspired threshold
+  return luminance > 0.5 ? '#000000' : '#FFFFFF';
+}
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -48,29 +69,37 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     currentTheme: 'light' | 'dark'
   ) => {
     const colors = config[currentTheme];
-    document.documentElement.style.setProperty(
-      '--color-primary',
-      colors.primary
-    );
-    document.documentElement.style.setProperty('--color-accent', colors.accent);
-    document.documentElement.style.setProperty('--color-text', colors.text);
-    document.documentElement.style.setProperty(
-      '--color-background',
-      colors.background
-    );
-    document.documentElement.style.setProperty(
+    const root = document.documentElement;
+
+    // Base colors
+    root.style.setProperty('--color-primary', colors.primary);
+    root.style.setProperty('--color-accent', colors.accent);
+    root.style.setProperty('--color-text', colors.text);
+    root.style.setProperty('--color-background', colors.background);
+    root.style.setProperty(
       '--color-background-secondary',
       colors.backgroundSecondary
     );
-    document.documentElement.style.setProperty(
+    root.style.setProperty(
       '--color-background-accent',
       colors.backgroundAccent
     );
 
+    // 🔁 Derived "on" colors for good contrast on primary/accent surfaces
+    root.style.setProperty(
+      '--color-on-primary',
+      getReadableTextColor(colors.primary)
+    );
+    root.style.setProperty(
+      '--color-on-accent',
+      getReadableTextColor(colors.accent)
+    );
+
+    // Tailwind dark mode toggle
     if (currentTheme === 'dark') {
-      document.documentElement.classList.add('dark');
+      root.classList.add('dark');
     } else {
-      document.documentElement.classList.remove('dark');
+      root.classList.remove('dark');
     }
   };
 
