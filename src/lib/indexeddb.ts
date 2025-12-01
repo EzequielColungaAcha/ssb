@@ -67,7 +67,12 @@ export interface CashDrawer {
 
 export interface CashMovement {
   id: string;
-  movement_type: 'sale' | 'manual_add' | 'manual_remove' | 'change_given' | 'cash_closing';
+  movement_type:
+    | 'sale'
+    | 'manual_add'
+    | 'manual_remove'
+    | 'change_given'
+    | 'cash_closing';
   sale_id?: string;
   bills_in?: Record<string, number>;
   bills_out?: Record<string, number>;
@@ -114,8 +119,10 @@ class IndexedDBService {
   private isInitialized = false;
 
   async init(): Promise<void> {
-    if (this.isInitialized && this.db) {
-      return;
+    if (this.isInitialized && this.db) return;
+
+    if (typeof indexedDB === 'undefined') {
+      throw new Error('IndexedDB is not available in this environment');
     }
 
     return new Promise((resolve, reject) => {
@@ -187,11 +194,20 @@ class IndexedDBService {
         }
 
         if (!db.objectStoreNames.contains('product_materia_prima')) {
-          const productMateriaPrimaStore = db.createObjectStore('product_materia_prima', {
-            keyPath: 'id',
+          const productMateriaPrimaStore = db.createObjectStore(
+            'product_materia_prima',
+            {
+              keyPath: 'id',
+            }
+          );
+          productMateriaPrimaStore.createIndex('product_id', 'product_id', {
+            unique: false,
           });
-          productMateriaPrimaStore.createIndex('product_id', 'product_id', { unique: false });
-          productMateriaPrimaStore.createIndex('materia_prima_id', 'materia_prima_id', { unique: false });
+          productMateriaPrimaStore.createIndex(
+            'materia_prima_id',
+            'materia_prima_id',
+            { unique: false }
+          );
         }
 
         if (!db.objectStoreNames.contains('app_settings')) {
@@ -208,7 +224,9 @@ class IndexedDBService {
     if (!this.db) throw new Error('Database not initialized');
 
     if (!this.db.objectStoreNames.contains(storeName)) {
-      throw new Error(`Object store '${storeName}' not found. Please refresh the page to upgrade the database.`);
+      throw new Error(
+        `Object store '${storeName}' not found. Please refresh the page to upgrade the database.`
+      );
     }
 
     const transaction = this.db.transaction(storeName, mode);
@@ -289,16 +307,37 @@ class IndexedDBService {
   }
 
   async exportData(): Promise<string> {
+    const [
+      products,
+      sales,
+      sale_items,
+      cash_drawer,
+      cash_movements,
+      logo_config,
+      materia_prima,
+      product_materia_prima,
+    ] = await Promise.all([
+      this.getAll<Product>('products'),
+      this.getAll<Sale>('sales'),
+      this.getAll<SaleItem>('sale_items'),
+      this.getAll<CashDrawer>('cash_drawer'),
+      this.getAll<CashMovement>('cash_movements'),
+      this.getAll<LogoConfig>('logo_config'),
+      this.getAll<MateriaPrima>('materia_prima'),
+      this.getAll<ProductMateriaPrima>('product_materia_prima'),
+    ]);
+
     const data: Record<string, any[]> = {
-      products: await this.getAll<Product>('products'),
-      sales: await this.getAll<Sale>('sales'),
-      sale_items: await this.getAll<SaleItem>('sale_items'),
-      cash_drawer: await this.getAll<CashDrawer>('cash_drawer'),
-      cash_movements: await this.getAll<CashMovement>('cash_movements'),
-      logo_config: await this.getAll<LogoConfig>('logo_config'),
-      materia_prima: await this.getAll<MateriaPrima>('materia_prima'),
-      product_materia_prima: await this.getAll<ProductMateriaPrima>('product_materia_prima'),
+      products,
+      sales,
+      sale_items,
+      cash_drawer,
+      cash_movements,
+      logo_config,
+      materia_prima,
+      product_materia_prima,
     };
+
     return JSON.stringify(data, null, 2);
   }
 
@@ -341,14 +380,16 @@ class IndexedDBService {
   }
 
   async resetDatabase(): Promise<void> {
-    await this.clear('products');
-    await this.clear('sales');
-    await this.clear('sale_items');
-    await this.clear('cash_drawer');
-    await this.clear('cash_movements');
-    await this.clear('logo_config');
-    await this.clear('materia_prima');
-    await this.clear('product_materia_prima');
+    await Promise.all([
+      this.clear('products'),
+      this.clear('sales'),
+      this.clear('sale_items'),
+      this.clear('cash_drawer'),
+      this.clear('cash_movements'),
+      this.clear('logo_config'),
+      this.clear('materia_prima'),
+      this.clear('product_materia_prima'),
+    ]);
   }
 }
 

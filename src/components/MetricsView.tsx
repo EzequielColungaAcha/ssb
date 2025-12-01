@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   TrendingUp,
   DollarSign,
   ShoppingCart,
   Package,
-  TrendingDown,
   Filter,
+  BarChart3,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
@@ -49,95 +49,101 @@ export function MetricsView() {
     []
   );
 
-  useEffect(() => {
-    calculateMetrics();
-  }, [sales, categoryFilter, productFilter, dateFilter, startDate, endDate, specificDate]);
+  const filterSalesByDate = useCallback(
+    (salesToFilter: typeof sales) => {
+      if (dateFilter === 'all') return salesToFilter;
 
-  useEffect(() => {
-    setProductFilter('all');
-  }, [categoryFilter]);
+      const now = new Date();
+      let filterStartDate: Date;
+      let filterEndDate: Date;
 
-  const filterSalesByDate = (salesToFilter: typeof sales) => {
-    if (dateFilter === 'all') return salesToFilter;
-
-    const now = new Date();
-    let filterStartDate: Date;
-    let filterEndDate: Date;
-
-    if (dateFilter === 'specific') {
-      if (!specificDate) return salesToFilter;
-      const [year, month, day] = specificDate.split('-').map(Number);
-      filterStartDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-      filterEndDate = new Date(year, month - 1, day, 23, 59, 59, 999);
-    } else if (dateFilter === 'custom') {
-      if (!startDate || !endDate) return salesToFilter;
-      const [startYear, startMonth, startDay] = startDate
-        .split('-')
-        .map(Number);
-      const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
-      filterStartDate = new Date(
-        startYear,
-        startMonth - 1,
-        startDay,
-        0,
-        0,
-        0,
-        0
-      );
-      filterEndDate = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
-    } else {
-      switch (dateFilter) {
-        case 'today':
-          filterStartDate = new Date(now);
-          filterStartDate.setHours(0, 0, 0, 0);
-          filterEndDate = new Date(now);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        case 'yesterday':
-          filterStartDate = new Date(now);
-          filterStartDate.setDate(filterStartDate.getDate() - 1);
-          filterStartDate.setHours(0, 0, 0, 0);
-          filterEndDate = new Date(filterStartDate);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        case 'last7':
-          filterStartDate = new Date(now);
-          filterStartDate.setDate(filterStartDate.getDate() - 6);
-          filterStartDate.setHours(0, 0, 0, 0);
-          filterEndDate = new Date(now);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        case 'last30':
-          filterStartDate = new Date(now);
-          filterStartDate.setDate(filterStartDate.getDate() - 29);
-          filterStartDate.setHours(0, 0, 0, 0);
-          filterEndDate = new Date(now);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        case 'thisMonth':
-          filterStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
-          filterEndDate = new Date(now);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        case 'lastMonth':
-          filterStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-          filterEndDate = new Date(now.getFullYear(), now.getMonth(), 0);
-          filterEndDate.setHours(23, 59, 59, 999);
-          break;
-        default:
-          return salesToFilter;
+      if (dateFilter === 'specific') {
+        if (!specificDate) return salesToFilter;
+        const [year, month, day] = specificDate.split('-').map(Number);
+        filterStartDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+        filterEndDate = new Date(year, month - 1, day, 23, 59, 59, 999);
+      } else if (dateFilter === 'custom') {
+        if (!startDate || !endDate) return salesToFilter;
+        const [startYear, startMonth, startDay] = startDate
+          .split('-')
+          .map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        filterStartDate = new Date(
+          startYear,
+          startMonth - 1,
+          startDay,
+          0,
+          0,
+          0,
+          0
+        );
+        filterEndDate = new Date(
+          endYear,
+          endMonth - 1,
+          endDay,
+          23,
+          59,
+          59,
+          999
+        );
+      } else {
+        switch (dateFilter) {
+          case 'today':
+            filterStartDate = new Date(now);
+            filterStartDate.setHours(0, 0, 0, 0);
+            filterEndDate = new Date(now);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          case 'yesterday':
+            filterStartDate = new Date(now);
+            filterStartDate.setDate(filterStartDate.getDate() - 1);
+            filterStartDate.setHours(0, 0, 0, 0);
+            filterEndDate = new Date(filterStartDate);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          case 'last7':
+            filterStartDate = new Date(now);
+            filterStartDate.setDate(filterStartDate.getDate() - 6);
+            filterStartDate.setHours(0, 0, 0, 0);
+            filterEndDate = new Date(now);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          case 'last30':
+            filterStartDate = new Date(now);
+            filterStartDate.setDate(filterStartDate.getDate() - 29);
+            filterStartDate.setHours(0, 0, 0, 0);
+            filterEndDate = new Date(now);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          case 'thisMonth':
+            filterStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            filterEndDate = new Date(now);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          case 'lastMonth':
+            filterStartDate = new Date(
+              now.getFullYear(),
+              now.getMonth() - 1,
+              1
+            );
+            filterEndDate = new Date(now.getFullYear(), now.getMonth(), 0);
+            filterEndDate.setHours(23, 59, 59, 999);
+            break;
+          default:
+            return salesToFilter;
+        }
       }
-    }
 
-    return salesToFilter.filter((sale) => {
-      const saleDate = new Date(sale.completed_at);
-      return saleDate >= filterStartDate && saleDate <= filterEndDate;
-    });
-  };
-
+      return salesToFilter.filter((sale) => {
+        const saleDate = new Date(sale.completed_at);
+        return saleDate >= filterStartDate && saleDate <= filterEndDate;
+      });
+    },
+    [dateFilter, endDate, specificDate, startDate]
+  );
   const [filteredSaleItems, setFilteredSaleItems] = useState<SaleItem[]>([]);
 
-  const calculateMetrics = async () => {
+  const calculateMetrics = useCallback(async () => {
     await db.init();
     const allSaleItems = await db.getAll<SaleItem>('sale_items');
 
@@ -247,8 +253,7 @@ export function MetricsView() {
     setTopProducts(topProductsData);
     setAllSoldProducts(allSoldProductsData);
     setMostProfitableProducts(mostProfitableData);
-  };
-
+  }, [categoryFilter, filterSalesByDate, productFilter, products, sales]);
   const filteredProducts =
     categoryFilter === 'all'
       ? products
@@ -263,32 +268,27 @@ export function MetricsView() {
   const totalSales = filteredSalesState.length;
   const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
 
-  const productsWithoutRawMaterials = inventoryFilteredProducts.filter(p => !p.uses_materia_prima);
+  const productsWithoutRawMaterials = inventoryFilteredProducts.filter(
+    (p) => !p.uses_materia_prima
+  );
   const productsInventoryValue = productsWithoutRawMaterials.reduce(
     (sum, product) => sum + product.production_cost * product.stock,
     0
   );
 
-  const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<any[]>([]);
-
-  useEffect(() => {
-    const loadLinks = async () => {
-      await db.init();
-      const links = await db.getAll('product_materia_prima');
-      setProductMateriaPrimaLinks(links);
-    };
-    loadLinks();
-  }, []);
+  const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<
+    any[]
+  >([]);
 
   const filteredRawMaterials = (() => {
     if (productFilter !== 'all') {
-      const selectedProduct = products.find(p => p.id === productFilter);
+      const selectedProduct = products.find((p) => p.id === productFilter);
       if (selectedProduct && selectedProduct.uses_materia_prima) {
         const links = productMateriaPrimaLinks.filter(
-          link => link.product_id === productFilter
+          (link) => link.product_id === productFilter
         );
-        const materiaPrimaIds = links.map(link => link.materia_prima_id);
-        return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
+        const materiaPrimaIds = links.map((link) => link.materia_prima_id);
+        return materiaPrima.filter((mp) => materiaPrimaIds.includes(mp.id));
       }
       return [];
     }
@@ -298,14 +298,14 @@ export function MetricsView() {
     }
 
     const categoryProducts = products.filter(
-      p => p.uses_materia_prima && p.category === categoryFilter
+      (p) => p.uses_materia_prima && p.category === categoryFilter
     );
-    const productIds = categoryProducts.map(p => p.id);
-    const links = productMateriaPrimaLinks.filter(
-      link => productIds.includes(link.product_id)
+    const productIds = categoryProducts.map((p) => p.id);
+    const links = productMateriaPrimaLinks.filter((link) =>
+      productIds.includes(link.product_id)
     );
-    const materiaPrimaIds = links.map(link => link.materia_prima_id);
-    return materiaPrima.filter(mp => materiaPrimaIds.includes(mp.id));
+    const materiaPrimaIds = links.map((link) => link.materia_prima_id);
+    return materiaPrima.filter((mp) => materiaPrimaIds.includes(mp.id));
   })();
 
   const rawMaterialsValue = filteredRawMaterials.reduce(
@@ -336,20 +336,45 @@ export function MetricsView() {
     { value: 'custom', label: 'Custom Range' },
   ];
 
+  useEffect(() => {
+    const loadLinks = async () => {
+      await db.init();
+      const links = await db.getAll('product_materia_prima');
+      setProductMateriaPrimaLinks(links);
+    };
+    loadLinks();
+  }, []);
+
+  useEffect(() => {
+    calculateMetrics();
+  }, [
+    sales,
+    categoryFilter,
+    productFilter,
+    dateFilter,
+    startDate,
+    endDate,
+    specificDate,
+    calculateMetrics,
+  ]);
+
+  useEffect(() => {
+    setProductFilter('all');
+  }, [categoryFilter]);
+
   return (
     <div className='p-6'>
       <div className='mb-6'>
         <h1
-          className='text-3xl font-bold'
+          className='text-3xl font-bold flex items-center gap-3'
           style={{ color: 'var(--color-text)' }}
         >
-          Metrics & Analytics
+          <BarChart3 style={{ color: 'var(--color-primary)' }} />
+          Métricas y Análisis
         </h1>
-        <p
-          className='text-sm opacity-60 mt-1 mb-4'
-          style={{ color: 'var(--color-text)' }}
-        >
-          Analizá el rendimiento de tu negocio con métricas detalladas y reportes visuales
+        <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
+          Analizá el rendimiento de tu negocio con métricas detalladas y
+          reportes visuales
         </p>
         <div className='flex flex-wrap items-center gap-3'>
           <div className='flex items-center gap-2'>
@@ -853,8 +878,10 @@ export function MetricsView() {
 
                     if (materiaPrimaProducts.length > 0) {
                       const avgPrice =
-                        materiaPrimaProducts.reduce((sum, p) => sum + p.price, 0) /
-                        materiaPrimaProducts.length;
+                        materiaPrimaProducts.reduce(
+                          (sum, p) => sum + p.price,
+                          0
+                        ) / materiaPrimaProducts.length;
                       const avgCost =
                         materiaPrimaProducts.reduce(
                           (sum, p) => sum + p.production_cost,
@@ -886,7 +913,9 @@ export function MetricsView() {
                 return (
                   <div
                     className='p-4 rounded-lg'
-                    style={{ backgroundColor: 'var(--color-background-accent)' }}
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                    }}
                   >
                     <div className='flex justify-between items-center mb-2'>
                       <div className='font-semibold capitalize dark:text-white'>

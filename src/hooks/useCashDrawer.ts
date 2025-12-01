@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db, CashDrawer, CashMovement } from '../lib/indexeddb';
 
 export interface CashDrawerBill {
@@ -13,7 +13,9 @@ export interface ChangeBreakdown {
   quantity: number;
 }
 
-const BILL_DENOMINATIONS = [10, 20, 50, 100, 200, 500, 1000, 2000, 10000, 20000];
+const BILL_DENOMINATIONS = [
+  10, 20, 50, 100, 200, 500, 1000, 2000, 10000, 20000,
+];
 
 export function useCashDrawer() {
   const [bills, setBills] = useState<CashDrawerBill[]>([]);
@@ -26,7 +28,11 @@ export function useCashDrawer() {
   const initializeBills = async () => {
     await db.init();
     for (const denomination of BILL_DENOMINATIONS) {
-      const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', denomination);
+      const existing = await db.getAllByIndex<CashDrawer>(
+        'cash_drawer',
+        'denomination',
+        denomination
+      );
       if (existing.length === 0) {
         const newBill: CashDrawer = {
           id: crypto.randomUUID(),
@@ -44,7 +50,7 @@ export function useCashDrawer() {
       await db.init();
       await initializeBills();
       const data = await db.getAll<CashDrawer>('cash_drawer');
-      const mapped: CashDrawerBill[] = data.map(d => ({
+      const mapped: CashDrawerBill[] = data.map((d) => ({
         id: d.id,
         denomination: d.denomination,
         quantity: d.quantity,
@@ -61,7 +67,11 @@ export function useCashDrawer() {
 
   const ensureBillExists = async (denomination: number) => {
     await db.init();
-    const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', denomination);
+    const existing = await db.getAllByIndex<CashDrawer>(
+      'cash_drawer',
+      'denomination',
+      denomination
+    );
     if (existing.length === 0) {
       const newBill: CashDrawer = {
         id: crypto.randomUUID(),
@@ -107,7 +117,11 @@ export function useCashDrawer() {
       await db.init();
       await ensureBillExists(denomination);
 
-      const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', denomination);
+      const existing = await db.getAllByIndex<CashDrawer>(
+        'cash_drawer',
+        'denomination',
+        denomination
+      );
       if (existing.length === 0) throw new Error('Bill not found');
 
       const currentBill = existing[0];
@@ -121,7 +135,15 @@ export function useCashDrawer() {
       await db.put('cash_drawer', updated);
 
       if (logType && quantityDiff !== 0) {
-        const billChange = { [denomination.toString()]: Math.abs(quantityDiff) };
+        const buildBillChange = (
+          denomination: number,
+          quantityDiff: number
+        ) => ({
+          [denomination.toString()]: Math.abs(quantityDiff),
+        });
+
+        const billChange = buildBillChange(denomination, quantityDiff);
+
         await logMovement(
           logType,
           quantityDiff > 0 ? billChange : undefined,
@@ -138,10 +160,17 @@ export function useCashDrawer() {
     }
   };
 
-  const updateBillQuantityOnly = async (denomination: number, quantity: number) => {
+  const updateBillQuantityOnly = async (
+    denomination: number,
+    quantity: number
+  ) => {
     await ensureBillExists(denomination);
     await db.init();
-    const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', denomination);
+    const existing = await db.getAllByIndex<CashDrawer>(
+      'cash_drawer',
+      'denomination',
+      denomination
+    );
     if (existing.length > 0) {
       const bill = existing[0];
       const updated: CashDrawer = {
@@ -153,7 +182,11 @@ export function useCashDrawer() {
     }
   };
 
-  const addBills = async (denomination: number, quantity: number, saleId?: string) => {
+  const addBills = async (
+    denomination: number,
+    quantity: number,
+    saleId?: string
+  ) => {
     await ensureBillExists(denomination);
     const bill = bills.find((b) => b.denomination === denomination);
     if (bill) {
@@ -167,7 +200,11 @@ export function useCashDrawer() {
     }
   };
 
-  const removeBills = async (denomination: number, quantity: number, saleId?: string) => {
+  const removeBills = async (
+    denomination: number,
+    quantity: number,
+    saleId?: string
+  ) => {
     const bill = bills.find((b) => b.denomination === denomination);
     if (bill && bill.quantity >= quantity) {
       await updateBillQuantity(denomination, bill.quantity - quantity);
@@ -180,11 +217,15 @@ export function useCashDrawer() {
     }
   };
 
-  const calculateOptimalChange = (changeAmount: number): ChangeBreakdown[] | null => {
+  const calculateOptimalChange = (
+    changeAmount: number
+  ): ChangeBreakdown[] | null => {
     if (changeAmount === 0) return [];
     if (changeAmount < 0) return null;
 
-    const sortedBills = [...bills].sort((a, b) => b.denomination - a.denomination);
+    const sortedBills = [...bills].sort(
+      (a, b) => b.denomination - a.denomination
+    );
     const result: ChangeBreakdown[] = [];
     let remaining = changeAmount;
 
@@ -212,7 +253,10 @@ export function useCashDrawer() {
     return result;
   };
 
-  const processChange = async (changeBreakdown: ChangeBreakdown[], saleId: string) => {
+  const processChange = async (
+    changeBreakdown: ChangeBreakdown[],
+    saleId: string
+  ) => {
     try {
       if (!changeBreakdown || changeBreakdown.length === 0) {
         return;
@@ -221,7 +265,10 @@ export function useCashDrawer() {
       for (const item of changeBreakdown) {
         const bill = bills.find((b) => b.denomination === item.bill_value);
         if (bill && bill.quantity >= item.quantity) {
-          await updateBillQuantityOnly(item.bill_value, bill.quantity - item.quantity);
+          await updateBillQuantityOnly(
+            item.bill_value,
+            bill.quantity - item.quantity
+          );
         }
       }
 
@@ -270,26 +317,34 @@ export function useCashDrawer() {
   };
 
   const getTotalCash = () => {
-    return bills.reduce((sum, bill) => sum + bill.denomination * bill.quantity, 0);
+    return bills.reduce(
+      (sum, bill) => sum + bill.denomination * bill.quantity,
+      0
+    );
   };
 
-  const getCashMovements = async (): Promise<CashMovement[]> => {
+  const getCashMovements = useCallback(async (): Promise<CashMovement[]> => {
     try {
       await db.init();
       const data = await db.getAll<CashMovement>('cash_movements');
-      return data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 100);
+      return data
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+        .slice(0, 100);
     } catch (error) {
       console.error('Error loading cash movements:', error);
       return [];
     }
-  };
+  }, []);
 
   const resetCashDrawer = async () => {
     try {
       await db.init();
 
       const currentState: Record<string, number> = {};
-      bills.forEach(bill => {
+      bills.forEach((bill) => {
         if (bill.quantity > 0) {
           currentState[bill.denomination.toString()] = bill.quantity;
         }
@@ -302,7 +357,11 @@ export function useCashDrawer() {
             quantity: 0,
             updated_at: new Date().toISOString(),
           };
-          const existing = await db.getAllByIndex<CashDrawer>('cash_drawer', 'denomination', bill.denomination);
+          const existing = await db.getAllByIndex<CashDrawer>(
+            'cash_drawer',
+            'denomination',
+            bill.denomination
+          );
           if (existing.length > 0) {
             await db.put('cash_drawer', { ...updated, id: existing[0].id });
           }

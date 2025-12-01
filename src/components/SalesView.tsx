@@ -1,15 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Calendar,
-  DollarSign,
-  Package,
-  ChevronDown,
-  ChevronUp,
-  Banknote,
-} from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Calendar, Package, History } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { Sale, SaleItem } from '../lib/indexeddb';
-import { translations as t } from '../lib/translations';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 export function SalesView() {
@@ -18,17 +10,13 @@ export function SalesView() {
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
   const [showBillsBreakdown, setShowBillsBreakdown] = useState(false);
 
-  useEffect(() => {
-    if (selectedSale) {
-      loadSaleItems(selectedSale.id);
-      setShowBillsBreakdown(false);
-    }
-  }, [selectedSale]);
-
-  const loadSaleItems = async (saleId: string) => {
-    const items = await getSaleItems(saleId);
-    setSaleItems(items);
-  };
+  const loadSaleItems = useCallback(
+    async (saleId: string) => {
+      const items = await getSaleItems(saleId);
+      setSaleItems(items);
+    },
+    [getSaleItems]
+  );
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -42,6 +30,13 @@ export function SalesView() {
     });
   };
 
+  useEffect(() => {
+    if (selectedSale) {
+      loadSaleItems(selectedSale.id);
+      setShowBillsBreakdown(false);
+    }
+  }, [loadSaleItems, selectedSale]);
+
   if (loading) {
     return <div className='p-6 dark:text-white'>Cargando...</div>;
   }
@@ -50,15 +45,13 @@ export function SalesView() {
     <div className='p-6'>
       <div className='mb-6'>
         <h1
-          className='text-3xl font-bold'
+          className='text-3xl font-bold flex items-center gap-3'
           style={{ color: 'var(--color-text)' }}
         >
+          <History style={{ color: 'var(--color-primary)' }} />
           Historial de Ventas
         </h1>
-        <p
-          className='text-sm opacity-60 mt-1'
-          style={{ color: 'var(--color-text)' }}
-        >
+        <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
           Consultá el registro completo de todas las transacciones realizadas
         </p>
       </div>
@@ -82,7 +75,7 @@ export function SalesView() {
               {sales.length} {sales.length === 1 ? 'venta' : 'ventas'}
             </span>
           </div>
-          <div className='space-y-3 max-h-[600px] overflow-auto scrollbar-hide'>
+          <div className='space-y-3 max-h-[60vh] overflow-auto scrollbar-hide'>
             {sales.length === 0 ? (
               <div className='text-center text-gray-400 py-8'>
                 Aún no hay ventas
@@ -118,9 +111,6 @@ export function SalesView() {
                         }}
                       >
                         #{sales.length - index}
-                      </div>
-                      <div className='font-mono font-semibold'>
-                        {parseInt(sale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
                       </div>
                     </div>
                     <div className='text-lg font-bold'>
@@ -161,9 +151,12 @@ export function SalesView() {
                   color: 'white',
                 }}
               >
-                <div className='text-sm opacity-90 mb-1'>Número de Venta</div>
+                <div className='text-sm opacity-90 mb-1'>Venta</div>
                 <div className='text-2xl font-bold mb-3'>
-                  {parseInt(selectedSale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
+                  #
+                  {parseInt(
+                    selectedSale.sale_number.replace(/^S-/, '')
+                  ).toLocaleString('es-AR')}
                 </div>
                 <div className='grid grid-cols-2 gap-4 text-sm'>
                   <div>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db, MateriaPrima, ProductMateriaPrima } from '../lib/indexeddb';
 
 export function useMateriaPrima() {
@@ -29,7 +29,9 @@ export function useMateriaPrima() {
     }
   };
 
-  const addMateriaPrima = async (mp: Omit<MateriaPrima, 'id' | 'created_at' | 'updated_at'>) => {
+  const addMateriaPrima = async (
+    mp: Omit<MateriaPrima, 'id' | 'created_at' | 'updated_at'>
+  ) => {
     try {
       await db.init();
       const now = new Date().toISOString();
@@ -47,7 +49,10 @@ export function useMateriaPrima() {
     }
   };
 
-  const updateMateriaPrima = async (id: string, updates: Partial<MateriaPrima>) => {
+  const updateMateriaPrima = async (
+    id: string,
+    updates: Partial<MateriaPrima>
+  ) => {
     try {
       await db.init();
       const existing = await db.get<MateriaPrima>('materia_prima', id);
@@ -152,14 +157,20 @@ export function useMateriaPrima() {
   const calculateProductCost = async (productId: string): Promise<number> => {
     try {
       await db.init();
-      if (!db.hasStore('materia_prima') || !db.hasStore('product_materia_prima')) {
+      if (
+        !db.hasStore('materia_prima') ||
+        !db.hasStore('product_materia_prima')
+      ) {
         return 0;
       }
       const links = await getProductMateriaPrima(productId);
 
       let totalCost = 0;
       for (const link of links) {
-        const mp = await db.get<MateriaPrima>('materia_prima', link.materia_prima_id);
+        const mp = await db.get<MateriaPrima>(
+          'materia_prima',
+          link.materia_prima_id
+        );
         if (mp) {
           totalCost += mp.cost_per_unit * link.quantity;
         }
@@ -172,16 +183,24 @@ export function useMateriaPrima() {
     }
   };
 
-  const checkStockAvailability = async (productId: string): Promise<boolean> => {
+  const checkStockAvailability = async (
+    productId: string
+  ): Promise<boolean> => {
     try {
       await db.init();
-      if (!db.hasStore('materia_prima') || !db.hasStore('product_materia_prima')) {
+      if (
+        !db.hasStore('materia_prima') ||
+        !db.hasStore('product_materia_prima')
+      ) {
         return true;
       }
       const links = await getProductMateriaPrima(productId);
 
       for (const link of links) {
-        const mp = await db.get<MateriaPrima>('materia_prima', link.materia_prima_id);
+        const mp = await db.get<MateriaPrima>(
+          'materia_prima',
+          link.materia_prima_id
+        );
         if (!mp || mp.stock < link.quantity) {
           return false;
         }
@@ -194,7 +213,10 @@ export function useMateriaPrima() {
     }
   };
 
-  const deductMateriaPrimaStock = async (productId: string, quantity: number = 1) => {
+  const deductMateriaPrimaStock = async (
+    productId: string,
+    quantity: number = 1
+  ) => {
     try {
       await db.init();
       const links = await getProductMateriaPrima(productId);
@@ -208,36 +230,45 @@ export function useMateriaPrima() {
     }
   };
 
-  const calculateAvailableStock = async (productId: string): Promise<number> => {
-    try {
-      await db.init();
-      if (!db.hasStore('materia_prima') || !db.hasStore('product_materia_prima')) {
-        return 0;
-      }
-      const links = await getProductMateriaPrima(productId);
+  const calculateAvailableStock = useCallback(
+    async (productId: string): Promise<number> => {
+      try {
+        await db.init();
+        if (
+          !db.hasStore('materia_prima') ||
+          !db.hasStore('product_materia_prima')
+        ) {
+          return 0;
+        }
+        const links = await getProductMateriaPrima(productId);
 
-      if (links.length === 0) {
-        return 0;
-      }
-
-      let minStock = Infinity;
-
-      for (const link of links) {
-        const mp = await db.get<MateriaPrima>('materia_prima', link.materia_prima_id);
-        if (!mp) {
+        if (links.length === 0) {
           return 0;
         }
 
-        const possibleUnits = Math.floor(mp.stock / link.quantity);
-        minStock = Math.min(minStock, possibleUnits);
-      }
+        let minStock = Infinity;
 
-      return minStock === Infinity ? 0 : minStock;
-    } catch (error) {
-      console.error('Error calculating available stock:', error);
-      return 0;
-    }
-  };
+        for (const link of links) {
+          const mp = await db.get<MateriaPrima>(
+            'materia_prima',
+            link.materia_prima_id
+          );
+          if (!mp) {
+            return 0;
+          }
+
+          const possibleUnits = Math.floor(mp.stock / link.quantity);
+          minStock = Math.min(minStock, possibleUnits);
+        }
+
+        return minStock === Infinity ? 0 : minStock;
+      } catch (error) {
+        console.error('Error calculating available stock:', error);
+        return 0;
+      }
+    },
+    []
+  );
 
   return {
     materiaPrima,

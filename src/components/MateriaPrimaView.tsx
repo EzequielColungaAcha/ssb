@@ -1,13 +1,18 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Package } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Beef } from 'lucide-react';
 import { toast } from 'sonner';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { MateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 export function MateriaPrimaView() {
-  const { materiaPrima, addMateriaPrima, updateMateriaPrima, deleteMateriaPrima, loading } =
-    useMateriaPrima();
+  const {
+    materiaPrima,
+    addMateriaPrima,
+    updateMateriaPrima,
+    deleteMateriaPrima,
+    loading,
+  } = useMateriaPrima();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -52,6 +57,7 @@ export function MateriaPrimaView() {
       );
     } catch (error) {
       toast.error('Error al guardar la materia prima');
+      console.error(error);
     }
   };
 
@@ -105,17 +111,15 @@ export function MateriaPrimaView() {
   return (
     <div className='p-6'>
       <div className='flex justify-between items-center mb-6'>
-        <div>
+        <div className='mb-6'>
           <h1
-            className='text-3xl font-bold'
+            className='text-3xl font-bold flex items-center gap-3'
             style={{ color: 'var(--color-text)' }}
           >
+            <Beef style={{ color: 'var(--color-primary)' }} />
             Materia Prima
           </h1>
-          <p
-            className='text-sm opacity-60 mt-1'
-            style={{ color: 'var(--color-text)' }}
-          >
+          <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
             Gestioná los ingredientes y materiales necesarios para tus productos
           </p>
         </div>
@@ -177,7 +181,10 @@ export function MateriaPrimaView() {
               <select
                 value={formData.unit}
                 onChange={(e) =>
-                  setFormData({ ...formData, unit: e.target.value as 'units' | 'kg' })
+                  setFormData({
+                    ...formData,
+                    unit: e.target.value as 'units' | 'kg',
+                  })
                 }
                 className='w-full px-3 py-2 border rounded-lg'
                 style={{
@@ -268,11 +275,21 @@ export function MateriaPrimaView() {
           className='text-center py-12 rounded-lg'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <Package size={48} className='mx-auto mb-4 opacity-40' style={{ color: 'var(--color-text)' }} />
-          <p className='text-lg opacity-60' style={{ color: 'var(--color-text)' }}>
+          <Beef
+            size={48}
+            className='mx-auto mb-4 opacity-40'
+            style={{ color: 'var(--color-text)' }}
+          />
+          <p
+            className='text-lg opacity-60'
+            style={{ color: 'var(--color-text)' }}
+          >
             No hay materia prima registrada
           </p>
-          <p className='text-sm opacity-40 mt-2' style={{ color: 'var(--color-text)' }}>
+          <p
+            className='text-sm opacity-40 mt-2'
+            style={{ color: 'var(--color-text)' }}
+          >
             Agregá ingredientes para vincularlos a tus productos
           </p>
         </div>
@@ -316,7 +333,8 @@ export function MateriaPrimaView() {
                       color: mp.stock < 10 ? '#ef4444' : 'var(--color-text)',
                     }}
                   >
-                    {formatNumber(mp.stock)} {mp.unit === 'units' ? 'un.' : 'kg'}
+                    {formatNumber(mp.stock)}{' '}
+                    {mp.unit === 'units' ? 'un.' : 'kg'}
                   </span>
                 </div>
                 <div className='flex justify-between'>

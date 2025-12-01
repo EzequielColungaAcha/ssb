@@ -33,24 +33,39 @@ const defaultThemeConfig: ThemeConfig = {
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const stored = localStorage.getItem('theme');
     return (stored as 'light' | 'dark') || 'light';
   });
 
-  const [themeConfig, setThemeConfig] = useState<ThemeConfig>(defaultThemeConfig);
+  const [themeConfig, setThemeConfig] =
+    useState<ThemeConfig>(defaultThemeConfig);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const applyThemeColors = (config: ThemeConfig, currentTheme: 'light' | 'dark') => {
+  const applyThemeColors = (
+    config: ThemeConfig,
+    currentTheme: 'light' | 'dark'
+  ) => {
     const colors = config[currentTheme];
-    document.documentElement.style.setProperty('--color-primary', colors.primary);
+    document.documentElement.style.setProperty(
+      '--color-primary',
+      colors.primary
+    );
     document.documentElement.style.setProperty('--color-accent', colors.accent);
     document.documentElement.style.setProperty('--color-text', colors.text);
-    document.documentElement.style.setProperty('--color-background', colors.background);
-    document.documentElement.style.setProperty('--color-background-secondary', colors.backgroundSecondary);
-    document.documentElement.style.setProperty('--color-background-accent', colors.backgroundAccent);
+    document.documentElement.style.setProperty(
+      '--color-background',
+      colors.background
+    );
+    document.documentElement.style.setProperty(
+      '--color-background-secondary',
+      colors.backgroundSecondary
+    );
+    document.documentElement.style.setProperty(
+      '--color-background-accent',
+      colors.backgroundAccent
+    );
 
     if (currentTheme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -64,13 +79,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       try {
         await db.init();
         const data = await db.getAll<LogoConfig>('logo_config');
-        console.log('Loading combined config from IndexedDB:', data);
         if (data.length > 0 && data[0].theme_config) {
-          console.log('Applying loaded theme config:', data[0].theme_config);
           setThemeConfig(data[0].theme_config);
           applyThemeColors(data[0].theme_config, theme);
         } else {
-          console.log('No theme config found, using default');
           applyThemeColors(defaultThemeConfig, theme);
         }
       } catch (error) {
@@ -82,7 +94,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
 
     loadThemeConfig();
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     if (isLoaded) {
@@ -103,7 +115,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const updateThemeConfig = async (config: ThemeConfig) => {
     try {
-      console.log('updateThemeConfig called with:', config);
       await db.init();
       const existing = await db.getAll<LogoConfig>('logo_config');
 
@@ -115,15 +126,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         updated_at: new Date().toISOString(),
       };
 
-      console.log('Saving combined config to IndexedDB:', combinedConfig);
-
       if (existing.length > 0) {
         await db.put('logo_config', combinedConfig);
       } else {
         await db.add('logo_config', combinedConfig);
       }
 
-      console.log('Theme config saved successfully');
       setThemeConfig(config);
       applyTheme(config);
     } catch (error) {
@@ -133,7 +141,16 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, themeConfig, updateThemeConfig, applyTheme, isLoading: !isLoaded }}>
+    <ThemeContext.Provider
+      value={{
+        theme,
+        toggleTheme,
+        themeConfig,
+        updateThemeConfig,
+        applyTheme,
+        isLoading: !isLoaded,
+      }}
+    >
       {children}
     </ThemeContext.Provider>
   );

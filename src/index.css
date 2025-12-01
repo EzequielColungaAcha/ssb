@@ -56,21 +56,31 @@ body {
   }
 }
 
-button, a, [role="button"] {
+button,
+a,
+[role='button'] {
   min-height: var(--min-touch-target);
   min-width: var(--min-touch-target);
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
-input, textarea, select {
+input,
+textarea,
+select {
   min-height: var(--min-touch-target);
   font-size: 16px;
   touch-action: manipulation;
 }
 
 @supports (hover: hover) and (pointer: fine) {
-  button:hover, a:hover, [role="button"]:hover {
+  button:hover,
+  a:hover,
+  [role='button']:hover {
     transition: all 0.2s ease;
   }
+}
+
+button {
+  touch-action: manipulation;
 }

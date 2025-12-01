@@ -1,5 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Minus, RefreshCw, ChevronDown, ChevronUp, History, DoorClosed, X, Package, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Wallet,
+  Plus,
+  Minus,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  History,
+  DoorClosed,
+  X,
+  Package,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useCashDrawer } from '../hooks/useCashDrawer';
 import { useSales } from '../hooks/useSales';
@@ -9,7 +20,14 @@ import { formatPrice, formatNumber } from '../lib/utils';
 import { Button } from './ui/button';
 
 export function CashDrawerView() {
-  const { bills, updateBillQuantity, getTotalCash, getCashMovements, resetCashDrawer, loading } = useCashDrawer();
+  const {
+    bills,
+    updateBillQuantity,
+    getTotalCash,
+    getCashMovements,
+    resetCashDrawer,
+    loading,
+  } = useCashDrawer();
   const { getSaleById, getSaleItems } = useSales();
   const [editingBill, setEditingBill] = useState<number | null>(null);
   const [newQuantity, setNewQuantity] = useState('');
@@ -20,27 +38,30 @@ export function CashDrawerView() {
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [filterMovementType, setFilterMovementType] = useState<string>('all');
-  const [filterBillDenomination, setFilterBillDenomination] = useState<string>('all');
+  const [filterBillDenomination, setFilterBillDenomination] =
+    useState<string>('all');
+
+  const loadMovements = useCallback(async () => {
+    setLoadingMovements(true);
+    const data = await getCashMovements();
+    setMovements(data);
+    setLoadingMovements(false);
+  }, [getCashMovements]);
 
   useEffect(() => {
     if (showMovements) {
       loadMovements();
     }
-  }, [showMovements]);
-
-  const loadMovements = async () => {
-    setLoadingMovements(true);
-    const data = await getCashMovements();
-    setMovements(data);
-    setLoadingMovements(false);
-  };
+  }, [loadMovements, showMovements]);
 
   const handleUpdateQuantity = async (billValue: number, quantity: number) => {
     try {
       const bill = bills.find((b) => b.denomination === billValue);
       const isIncrease = bill && quantity > bill.quantity;
       const logType = isIncrease ? 'manual_add' : 'manual_remove';
-      const description = isIncrease ? 'Ajuste manual (agregado)' : 'Ajuste manual (retiro)';
+      const description = isIncrease
+        ? 'Ajuste manual (agregado)'
+        : 'Ajuste manual (retiro)';
 
       await updateBillQuantity(billValue, quantity, logType, description);
       setEditingBill(null);
@@ -50,6 +71,7 @@ export function CashDrawerView() {
       }
     } catch (error) {
       toast.error(t.cashDrawer.errorUpdating);
+      console.error(error);
     }
   };
 
@@ -102,13 +124,20 @@ export function CashDrawerView() {
   };
 
   const filteredMovements = movements.filter((movement) => {
-    if (filterMovementType !== 'all' && movement.movement_type !== filterMovementType) {
+    if (
+      filterMovementType !== 'all' &&
+      movement.movement_type !== filterMovementType
+    ) {
       return false;
     }
 
     if (filterBillDenomination !== 'all') {
-      const hasBillIn = movement.bills_in && Object.keys(movement.bills_in).includes(filterBillDenomination);
-      const hasBillOut = movement.bills_out && Object.keys(movement.bills_out).includes(filterBillDenomination);
+      const hasBillIn =
+        movement.bills_in &&
+        Object.keys(movement.bills_in).includes(filterBillDenomination);
+      const hasBillOut =
+        movement.bills_out &&
+        Object.keys(movement.bills_out).includes(filterBillDenomination);
       if (!hasBillIn && !hasBillOut) {
         return false;
       }
@@ -126,7 +155,9 @@ export function CashDrawerView() {
     }
 
     toast('Cierre de Caja', {
-      description: `¿Estás seguro de que deseas cerrar la caja? Se registrará el estado actual (${formatPrice(totalCash)}) y todos los billetes se establecerán a 0.`,
+      description: `¿Estás seguro de que deseas cerrar la caja? Se registrará el estado actual (${formatPrice(
+        totalCash
+      )}) y todos los billetes se establecerán a 0.`,
       action: {
         label: 'Cerrar',
         onClick: async () => {
@@ -138,6 +169,7 @@ export function CashDrawerView() {
             }
           } catch (error) {
             toast.error('Error al cerrar la caja');
+            console.error(error);
           }
         },
       },
@@ -161,75 +193,110 @@ export function CashDrawerView() {
       }
     } catch (error) {
       toast.error('Error al cargar los detalles de la venta');
+      console.error(error);
     }
   };
 
   if (loading) {
-    return <div className="p-6 dark:text-white">{t.cashDrawer.loading}</div>;
+    return <div className='p-6 dark:text-white'>{t.cashDrawer.loading}</div>;
   }
 
   const totalCash = getTotalCash();
 
   return (
-    <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold flex items-center gap-3" style={{ color: 'var(--color-text)' }}>
+    <div className='p-6'>
+      <div className='mb-6'>
+        <h1
+          className='text-3xl font-bold flex items-center gap-3'
+          style={{ color: 'var(--color-text)' }}
+        >
           <Wallet style={{ color: 'var(--color-primary)' }} />
           {t.cashDrawer.title}
         </h1>
-        <p className="opacity-60 mt-2" style={{ color: 'var(--color-text)' }}>
+        <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
           {t.cashDrawer.subtitle}
         </p>
       </div>
 
-      <div className="rounded-lg shadow-lg p-6 mb-6" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-        <div className="flex items-center justify-between mb-4">
+      <div
+        className='rounded-lg shadow-lg p-6 mb-6'
+        style={{ backgroundColor: 'var(--color-background-secondary)' }}
+      >
+        <div className='flex items-center justify-between mb-4'>
           <div>
-            <div className="text-sm opacity-60 mb-1" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.totalCash}</div>
-            <div className="text-4xl font-bold" style={{ color: 'var(--color-primary)' }}>
+            <div
+              className='text-sm opacity-60 mb-1'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {t.cashDrawer.totalCash}
+            </div>
+            <div
+              className='text-4xl font-bold'
+              style={{ color: 'var(--color-primary)' }}
+            >
               {formatPrice(totalCash)}
             </div>
           </div>
-          <Wallet size={64} className="text-gray-300 dark:text-gray-600" />
+          <Wallet size={64} className='text-gray-300 dark:text-gray-600' />
         </div>
         <Button
           onClick={handleResetCashDrawer}
           disabled={totalCash === 0}
-          className="w-full py-2 px-4 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-semibold transition-colors"
-          variant="secondary"
+          className='w-full py-2 px-4 rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-semibold transition-colors'
+          variant='secondary'
         >
           <DoorClosed size={18} />
           Cierre de Caja
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6'>
         {bills.map((bill) => (
           <div
             key={bill.denomination}
-            className="rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"
+            className='rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow'
             style={{ backgroundColor: 'var(--color-background-secondary)' }}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className='flex items-center justify-between mb-4'>
               <div>
-                <div className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.billValue}</div>
-                <div className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>{formatPrice(bill.denomination)}</div>
+                <div
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {t.cashDrawer.billValue}
+                </div>
+                <div
+                  className='text-2xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {formatPrice(bill.denomination)}
+                </div>
               </div>
-              <div className="text-right">
-                <div className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.quantity}</div>
+              <div className='text-right'>
+                <div
+                  className='text-sm opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {t.cashDrawer.quantity}
+                </div>
                 {editingBill === bill.denomination ? (
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className='flex items-center gap-2 mt-1'>
                     <input
-                      type="number"
-                      min="0"
+                      type='number'
+                      min='0'
                       value={newQuantity}
                       onChange={(e) => setNewQuantity(e.target.value)}
-                      className="w-20 px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                      className='w-20 px-2 py-1 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white'
                       autoFocus
                     />
                     <button
-                      onClick={() => handleUpdateQuantity(bill.denomination, parseInt(newQuantity) || 0)}
-                      className="px-2 py-1 rounded text-white text-sm"
+                      onClick={() =>
+                        handleUpdateQuantity(
+                          bill.denomination,
+                          parseInt(newQuantity) || 0
+                        )
+                      }
+                      className='px-2 py-1 rounded text-white text-sm'
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       {t.cashDrawer.save}
@@ -241,7 +308,7 @@ export function CashDrawerView() {
                       setEditingBill(bill.denomination);
                       setNewQuantity(bill.quantity.toString());
                     }}
-                    className="text-3xl font-bold hover:opacity-70"
+                    className='text-3xl font-bold hover:opacity-70'
                     style={{ color: 'var(--color-text)' }}
                   >
                     {formatNumber(bill.quantity)}
@@ -250,25 +317,33 @@ export function CashDrawerView() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.totalValue}</span>
-              <span className="font-bold text-lg" style={{ color: 'var(--color-text)' }}>
+            <div className='flex items-center justify-between mb-3'>
+              <span
+                className='text-sm opacity-60'
+                style={{ color: 'var(--color-text)' }}
+              >
+                {t.cashDrawer.totalValue}
+              </span>
+              <span
+                className='font-bold text-lg'
+                style={{ color: 'var(--color-text)' }}
+              >
                 {formatPrice(bill.denomination * bill.quantity)}
               </span>
             </div>
 
-            <div className="flex gap-2">
+            <div className='flex gap-2'>
               <button
                 onClick={() => handleQuickAdjust(bill.denomination, -1)}
                 disabled={bill.quantity === 0}
-                className="flex-1 py-2 px-3 rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                className='flex-1 py-2 px-3 rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1'
               >
                 <Minus size={16} />
                 {t.cashDrawer.remove}
               </button>
               <button
                 onClick={() => handleQuickAdjust(bill.denomination, 1)}
-                className="flex-1 py-2 px-3 rounded text-white hover:opacity-90 flex items-center justify-center gap-1"
+                className='flex-1 py-2 px-3 rounded text-white hover:opacity-90 flex items-center justify-center gap-1'
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 <Plus size={16} />
@@ -279,69 +354,100 @@ export function CashDrawerView() {
         ))}
       </div>
 
-      <div className="mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6">
-        <div className="flex items-start gap-3">
-          <RefreshCw size={20} className="text-blue-600 dark:text-blue-400 mt-0.5" />
-          <div className="text-sm text-blue-700 dark:text-blue-400">
-            <div className="font-semibold mb-1">{t.cashDrawer.automaticUpdates}</div>
+      <div className='mt-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 mb-6'>
+        <div className='flex items-start gap-3'>
+          <RefreshCw
+            size={20}
+            className='text-blue-600 dark:text-blue-400 mt-0.5'
+          />
+          <div className='text-sm text-blue-700 dark:text-blue-400'>
+            <div className='font-semibold mb-1'>
+              {t.cashDrawer.automaticUpdates}
+            </div>
             <div>{t.cashDrawer.automaticUpdatesDesc}</div>
           </div>
         </div>
       </div>
 
-      <div className="rounded-lg shadow-md" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
+      <div
+        className='rounded-lg shadow-md'
+        style={{ backgroundColor: 'var(--color-background-secondary)' }}
+      >
         <button
           onClick={() => setShowMovements(!showMovements)}
-          className="w-full p-6 flex items-center justify-between hover:opacity-70 transition-colors"
+          className='w-full p-6 flex items-center justify-between hover:opacity-70 transition-colors'
         >
-          <div className="flex items-center gap-3">
+          <div className='flex items-center gap-3'>
             <History size={24} style={{ color: 'var(--color-primary)' }} />
-            <div className="text-left">
-              <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.movementsLog}</h2>
-              <p className="text-sm opacity-60" style={{ color: 'var(--color-text)' }}>{t.cashDrawer.movementsLogDesc}</p>
+            <div className='text-left'>
+              <h2
+                className='text-xl font-bold'
+                style={{ color: 'var(--color-text)' }}
+              >
+                {t.cashDrawer.movementsLog}
+              </h2>
+              <p
+                className='text-sm opacity-60'
+                style={{ color: 'var(--color-text)' }}
+              >
+                {t.cashDrawer.movementsLogDesc}
+              </p>
             </div>
           </div>
-          {showMovements ? <ChevronUp size={24} className="dark:text-white" /> : <ChevronDown size={24} className="dark:text-white" />}
+          {showMovements ? (
+            <ChevronUp size={24} className='dark:text-white' />
+          ) : (
+            <ChevronDown size={24} className='dark:text-white' />
+          )}
         </button>
 
         {showMovements && (
-          <div className="border-t dark:border-gray-700 p-6">
+          <div className='border-t dark:border-gray-700 p-6'>
             {loadingMovements ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t.cashDrawer.loading}</div>
+              <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+                {t.cashDrawer.loading}
+              </div>
             ) : movements.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">{t.cashDrawer.noMovements}</div>
+              <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+                {t.cashDrawer.noMovements}
+              </div>
             ) : (
               <>
-                <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className='mb-4 grid grid-cols-1 md:grid-cols-2 gap-3'>
                   <div>
-                    <label className="block text-sm font-medium mb-2 dark:text-white">
+                    <label className='block text-sm font-medium mb-2 dark:text-white'>
                       Filtrar por Tipo
                     </label>
                     <select
                       value={filterMovementType}
                       onChange={(e) => setFilterMovementType(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      className='w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white'
                     >
-                      <option value="all">Todos</option>
-                      <option value="sale">Venta</option>
-                      <option value="change_given">Cambio Dado</option>
-                      <option value="cash_closing">Cierre de Caja</option>
-                      <option value="manual_add">Agregado Manual</option>
-                      <option value="manual_remove">Retiro Manual</option>
+                      <option value='all'>Todos</option>
+                      <option value='sale'>Venta</option>
+                      <option value='change_given'>Cambio Dado</option>
+                      <option value='cash_closing'>Cierre de Caja</option>
+                      <option value='manual_add'>Agregado Manual</option>
+                      <option value='manual_remove'>Retiro Manual</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-2 dark:text-white">
+                    <label className='block text-sm font-medium mb-2 dark:text-white'>
                       Filtrar por Billete
                     </label>
                     <select
                       value={filterBillDenomination}
-                      onChange={(e) => setFilterBillDenomination(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                      onChange={(e) =>
+                        setFilterBillDenomination(e.target.value)
+                      }
+                      className='w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-700 dark:text-white'
                     >
-                      <option value="all">Todos</option>
+                      <option value='all'>Todos</option>
                       {bills.map((bill) => (
-                        <option key={bill.denomination} value={bill.denomination.toString()}>
+                        <option
+                          key={bill.denomination}
+                          value={bill.denomination.toString()}
+                        >
                           {formatPrice(bill.denomination)}
                         </option>
                       ))}
@@ -349,74 +455,84 @@ export function CashDrawerView() {
                   </div>
                 </div>
                 {filteredMovements.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
                     No hay movimientos que coincidan con los filtros
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-96 overflow-auto scrollbar-hide">
+                  <div className='space-y-3 max-h-96 overflow-auto scrollbar-hide'>
                     {filteredMovements.map((movement) => (
-                  <div
-                    key={movement.id}
-                    className="p-4 rounded-lg bg-gray-50 dark:bg-gray-700"
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`font-semibold ${getMovementColor(movement.movement_type)}`}>
-                            {getMovementTypeLabel(movement.movement_type)}
-                          </span>
-                          {movement.sale_id && (
-                            <button
-                              onClick={() => handleViewSale(movement.sale_id!)}
-                              className="text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer"
-                            >
-                              ID: {movement.sale_id.slice(0, 8)}
-                            </button>
-                          )}
-                        </div>
-                        <div className="text-sm text-gray-600 dark:text-gray-300">
-                          {movement.bills_in && Object.keys(movement.bills_in).length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {Object.entries(movement.bills_in)
-                                .sort(([a], [b]) => Number(b) - Number(a))
-                                .map(([denom, qty]) => (
-                                  <span
-                                    key={denom}
-                                    className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded"
-                                  >
-                                    {formatNumber(qty)}x {formatPrice(Number(denom))}
-                                  </span>
-                                ))}
+                      <div
+                        key={movement.id}
+                        className='p-4 rounded-lg bg-gray-50 dark:bg-gray-700'
+                      >
+                        <div className='flex items-start justify-between mb-2'>
+                          <div className='flex-1'>
+                            <div className='flex items-center gap-2 mb-1'>
+                              <span
+                                className={`font-semibold ${getMovementColor(
+                                  movement.movement_type
+                                )}`}
+                              >
+                                {getMovementTypeLabel(movement.movement_type)}
+                              </span>
+                              {movement.sale_id && (
+                                <button
+                                  onClick={() =>
+                                    handleViewSale(movement.sale_id!)
+                                  }
+                                  className='text-xs px-2 py-1 rounded bg-gray-200 dark:bg-gray-600 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors cursor-pointer'
+                                >
+                                  ID: {movement.sale_id.slice(0, 8)}
+                                </button>
+                              )}
                             </div>
-                          )}
-                          {movement.bills_out && Object.keys(movement.bills_out).length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {Object.entries(movement.bills_out)
-                                .sort(([a], [b]) => Number(b) - Number(a))
-                                .map(([denom, qty]) => (
-                                  <span
-                                    key={denom}
-                                    className="text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded"
-                                  >
-                                    {formatNumber(qty)}x {formatPrice(Number(denom))}
-                                  </span>
-                                ))}
+                            <div className='text-sm text-gray-600 dark:text-gray-300'>
+                              {movement.bills_in &&
+                                Object.keys(movement.bills_in).length > 0 && (
+                                  <div className='flex flex-wrap gap-1 mt-2'>
+                                    {Object.entries(movement.bills_in)
+                                      .sort(([a], [b]) => Number(b) - Number(a))
+                                      .map(([denom, qty]) => (
+                                        <span
+                                          key={denom}
+                                          className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded'
+                                        >
+                                          {formatNumber(qty)}x{' '}
+                                          {formatPrice(Number(denom))}
+                                        </span>
+                                      ))}
+                                  </div>
+                                )}
+                              {movement.bills_out &&
+                                Object.keys(movement.bills_out).length > 0 && (
+                                  <div className='flex flex-wrap gap-1 mt-2'>
+                                    {Object.entries(movement.bills_out)
+                                      .sort(([a], [b]) => Number(b) - Number(a))
+                                      .map(([denom, qty]) => (
+                                        <span
+                                          key={denom}
+                                          className='text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded'
+                                        >
+                                          {formatNumber(qty)}x{' '}
+                                          {formatPrice(Number(denom))}
+                                        </span>
+                                      ))}
+                                  </div>
+                                )}
                             </div>
-                          )}
-                        </div>
-                        {movement.notes && (
-                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {movement.notes}
+                            {movement.notes && (
+                              <div className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                                {movement.notes}
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <div className='text-right text-xs text-gray-500 dark:text-gray-400'>
+                            {formatDate(movement.created_at)}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-right text-xs text-gray-500 dark:text-gray-400">
-                        {formatDate(movement.created_at)}
-                      </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
                 )}
               </>
             )}
@@ -425,77 +541,86 @@ export function CashDrawerView() {
       </div>
 
       {showSaleModal && selectedSale && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'>
           <div
-            className="rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
+            className='rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-auto'
             style={{ backgroundColor: 'var(--color-background-secondary)' }}
           >
-            <div className="sticky top-0 z-10 flex items-center justify-between p-6 border-b dark:border-gray-700" style={{ backgroundColor: 'var(--color-background-secondary)' }}>
-              <h2 className="text-2xl font-bold" style={{ color: 'var(--color-text)' }}>
+            <div
+              className='sticky top-0 z-10 flex items-center justify-between p-6 border-b dark:border-gray-700'
+              style={{ backgroundColor: 'var(--color-background-secondary)' }}
+            >
+              <h2
+                className='text-2xl font-bold'
+                style={{ color: 'var(--color-text)' }}
+              >
                 Detalles de Venta
               </h2>
               <button
                 onClick={() => setShowSaleModal(false)}
-                className="flex justify-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className='flex justify-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors'
               >
                 <X size={24} style={{ color: 'var(--color-text)' }} />
               </button>
             </div>
 
-            <div className="p-6">
+            <div className='p-6'>
               <div
-                className="mb-6 p-4 rounded-lg"
+                className='mb-6 p-4 rounded-lg'
                 style={{
                   backgroundColor: 'var(--color-primary)',
                   color: 'white',
                 }}
               >
-                <div className="text-sm opacity-90 mb-1">Número de Venta</div>
-                <div className="text-2xl font-bold mb-3">
-                  {parseInt(selectedSale.sale_number.replace(/^S-/, '')).toLocaleString('es-CL')}
+                <div className='text-sm opacity-90 mb-1'>Venta</div>
+                <div className='text-2xl font-bold mb-3'>
+                  #
+                  {parseInt(
+                    selectedSale.sale_number.replace(/^S-/, '')
+                  ).toLocaleString('es-AR')}
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className='grid grid-cols-2 gap-4 text-sm'>
                   <div>
-                    <div className="opacity-90">Fecha</div>
-                    <div className="font-semibold">
+                    <div className='opacity-90'>Fecha</div>
+                    <div className='font-semibold'>
                       {formatDate(selectedSale.completed_at)}
                     </div>
                   </div>
                   <div>
-                    <div className="opacity-90">Pago</div>
-                    <div className="font-semibold capitalize">
+                    <div className='opacity-90'>Pago</div>
+                    <div className='font-semibold capitalize'>
                       {selectedSale.payment_method}
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mb-4">
+              <div className='mb-4'>
                 <h3
-                  className="font-semibold mb-3 flex items-center gap-2"
+                  className='font-semibold mb-3 flex items-center gap-2'
                   style={{ color: 'var(--color-text)' }}
                 >
                   <Package size={18} />
                   Artículos
                 </h3>
-                <div className="space-y-2">
+                <div className='space-y-2'>
                   {saleItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex justify-between items-center p-3 rounded-lg"
+                      className='flex justify-between items-center p-3 rounded-lg'
                       style={{
                         backgroundColor: 'var(--color-background-accent)',
                       }}
                     >
                       <div>
                         <div
-                          className="font-semibold"
+                          className='font-semibold'
                           style={{ color: 'var(--color-text)' }}
                         >
                           {item.product_name}
                         </div>
                         <div
-                          className="text-sm opacity-60"
+                          className='text-sm opacity-60'
                           style={{ color: 'var(--color-text)' }}
                         >
                           {formatPrice(item.product_price)} ×{' '}
@@ -503,7 +628,7 @@ export function CashDrawerView() {
                         </div>
                       </div>
                       <div
-                        className="font-bold"
+                        className='font-bold'
                         style={{ color: 'var(--color-text)' }}
                       >
                         {formatPrice(item.subtotal)}
@@ -513,39 +638,39 @@ export function CashDrawerView() {
                 </div>
               </div>
 
-              <div className="border-t pt-4 space-y-2">
+              <div className='border-t pt-4 space-y-2'>
                 <div
-                  className="flex justify-between text-lg"
+                  className='flex justify-between text-lg'
                   style={{ color: 'var(--color-text)' }}
                 >
                   <span>Total:</span>
-                  <span className="font-bold">
+                  <span className='font-bold'>
                     {formatPrice(selectedSale.total_amount)}
                   </span>
                 </div>
                 {selectedSale.cash_received && (
                   <>
-                    <div className="pt-2">
+                    <div className='pt-2'>
                       <div
-                        className="flex justify-between text-sm mb-2"
+                        className='flex justify-between text-sm mb-2'
                         style={{ color: 'var(--color-text)' }}
                       >
-                        <span className="font-semibold">
+                        <span className='font-semibold'>
                           Efectivo Recibido:
                         </span>
-                        <span className="font-bold">
+                        <span className='font-bold'>
                           {formatPrice(selectedSale.cash_received)}
                         </span>
                       </div>
                       {selectedSale.bills_received &&
                         Object.keys(selectedSale.bills_received).length > 0 && (
-                          <div className="ml-4 mt-1 flex flex-wrap gap-1">
+                          <div className='ml-4 mt-1 flex flex-wrap gap-1'>
                             {Object.entries(selectedSale.bills_received)
                               .sort(([a], [b]) => Number(b) - Number(a))
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded"
+                                  className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded'
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}
@@ -555,22 +680,22 @@ export function CashDrawerView() {
                         )}
                     </div>
 
-                    <div className="pt-2">
-                      <div className="flex justify-between text-sm dark:text-gray-300 mb-2">
-                        <span className="font-semibold">Cambio Entregado:</span>
-                        <span className="font-bold">
+                    <div className='pt-2'>
+                      <div className='flex justify-between text-sm dark:text-gray-300 mb-2'>
+                        <span className='font-semibold'>Cambio Entregado:</span>
+                        <span className='font-bold'>
                           {formatPrice(selectedSale.change_given || 0)}
                         </span>
                       </div>
                       {selectedSale.bills_change &&
                         Object.keys(selectedSale.bills_change).length > 0 && (
-                          <div className="ml-4 mt-1 flex flex-wrap gap-1">
+                          <div className='ml-4 mt-1 flex flex-wrap gap-1'>
                             {Object.entries(selectedSale.bills_change)
                               .sort(([a], [b]) => Number(b) - Number(a))
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className="text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded"
+                                  className='text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded'
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}

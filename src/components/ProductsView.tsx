@@ -16,7 +16,9 @@ export function ProductsView() {
     calculateProductCost,
     calculateAvailableStock,
   } = useMateriaPrima();
-  const [productStocks, setProductStocks] = useState<Record<string, number>>({});
+  const [productStocks, setProductStocks] = useState<Record<string, number>>(
+    {}
+  );
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -39,27 +41,38 @@ export function ProductsView() {
   ];
 
   useEffect(() => {
+    if (!products.length) {
+      setProductStocks({});
+      return;
+    }
+
     const loadStocks = async () => {
-      const stocks: Record<string, number> = {};
-      for (const product of products) {
-        if (product.uses_materia_prima) {
-          stocks[product.id] = await calculateAvailableStock(product.id);
-        }
+      const materiaPrimaProducts = products.filter((p) => p.uses_materia_prima);
+
+      if (!materiaPrimaProducts.length) {
+        setProductStocks({});
+        return;
       }
-      setProductStocks(stocks);
+
+      const entries = await Promise.all(
+        materiaPrimaProducts.map(async (product) => {
+          const available = await calculateAvailableStock(product.id);
+          return [product.id, available] as const;
+        })
+      );
+
+      setProductStocks(Object.fromEntries(entries));
     };
 
-    if (products.length > 0) {
-      loadStocks();
-    }
-  }, [products, materiaPrima]);
+    loadStocks();
+  }, [products, calculateAvailableStock]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     try {
       const usesMateriaPrima = formData.uses_materia_prima;
-      let productionCost = parseFloat(formData.production_cost);
+      const productionCost = parseFloat(formData.production_cost);
 
       if (usesMateriaPrima && materiaPrimaItems.length === 0) {
         toast.error('Agregá al menos un ingrediente de materia prima');
@@ -121,6 +134,7 @@ export function ProductsView() {
       );
     } catch (error) {
       toast.error('Error al guardar el producto');
+      console.error(error);
     }
   };
 
@@ -162,6 +176,7 @@ export function ProductsView() {
             toast.success('Producto eliminado exitosamente');
           } catch (error) {
             toast.error('Error al eliminar el producto');
+            console.error(error);
           }
         },
       },
@@ -215,17 +230,15 @@ export function ProductsView() {
   return (
     <div className='p-6'>
       <div className='flex justify-between items-center mb-6'>
-        <div>
+        <div className='mb-6'>
           <h1
-            className='text-3xl font-bold'
+            className='text-3xl font-bold flex items-center gap-3'
             style={{ color: 'var(--color-text)' }}
           >
+            <Package style={{ color: 'var(--color-primary)' }} />
             Productos
           </h1>
-          <p
-            className='text-sm opacity-60 mt-1'
-            style={{ color: 'var(--color-text)' }}
-          >
+          <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
             Administrá tu catálogo de productos, precios y categorías
           </p>
         </div>
@@ -282,7 +295,10 @@ export function ProductsView() {
                 id='uses_materia_prima'
                 checked={formData.uses_materia_prima}
                 onChange={(e) => {
-                  setFormData({ ...formData, uses_materia_prima: e.target.checked });
+                  setFormData({
+                    ...formData,
+                    uses_materia_prima: e.target.checked,
+                  });
                   if (!e.target.checked) {
                     setMateriaPrimaItems([]);
                   }
@@ -352,7 +368,8 @@ export function ProductsView() {
                           <option value=''>Seleccionar ingrediente</option>
                           {materiaPrima.map((mp) => (
                             <option key={mp.id} value={mp.id}>
-                              {mp.name} ({mp.unit === 'units' ? 'unidades' : 'kg'})
+                              {mp.name} (
+                              {mp.unit === 'units' ? 'unidades' : 'kg'})
                             </option>
                           ))}
                         </select>
@@ -362,7 +379,11 @@ export function ProductsView() {
                           required
                           value={item.quantity}
                           onChange={(e) =>
-                            updateMateriaPrimaItem(index, 'quantity', e.target.value)
+                            updateMateriaPrimaItem(
+                              index,
+                              'quantity',
+                              e.target.value
+                            )
                           }
                           placeholder='Cantidad'
                           className='w-32 px-3 py-2 border rounded-lg'
@@ -477,7 +498,8 @@ export function ProductsView() {
                   className='text-sm opacity-80'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  El stock de este producto se calcula automáticamente según la disponibilidad de materia prima.
+                  El stock de este producto se calcula automáticamente según la
+                  disponibilidad de materia prima.
                 </p>
               </div>
             )}
@@ -550,154 +572,181 @@ export function ProductsView() {
         </div>
       )}
 
-      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-        {products.map((product) => (
-          <div
-            key={product.id}
-            className='rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow border-2 relative'
-            style={{
-              backgroundColor: 'var(--color-background-secondary)',
-              borderColor: 'var(--color-primary)',
-            }}
+      {products.length === 0 ? (
+        <div
+          className='text-center py-12 rounded-lg'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <Package
+            size={48}
+            className='mx-auto mb-4 opacity-40'
+            style={{ color: 'var(--color-text)' }}
+          />
+          <p
+            className='text-lg opacity-60'
+            style={{ color: 'var(--color-text)' }}
           >
-            {product.uses_materia_prima && (
-              <div
-                className='absolute top-3 right-3 p-1.5 rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-primary)',
-                  opacity: 0.9,
-                }}
-                title="Usa Materia Prima"
-              >
-                <Package size={16} className='text-white' />
-              </div>
-            )}
-            <div className='mb-3'>
-              <h3
-                className='text-lg font-bold'
-                style={{ color: 'var(--color-text)' }}
-              >
-                {product.name}
-              </h3>
-              <p
-                className='text-sm opacity-60 capitalize'
-                style={{ color: 'var(--color-text)' }}
-              >
-                {product.category}
-              </p>
-            </div>
-
-            <div className='space-y-1'>
-              <div className='flex justify-between'>
-                <span
-                  className='text-sm opacity-60'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  Precio de Venta:
-                </span>
-                <span
-                  className='font-bold'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  {formatPrice(product.price)}
-                </span>
-              </div>
-              <div className='flex justify-between'>
-                <span
-                  className='text-sm opacity-60'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  Costo:
-                </span>
-                <span
-                  className='font-bold opacity-60'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  {formatPrice(product.production_cost)}
-                  {product.uses_materia_prima && (
-                    <span className='text-xs ml-1'>(auto)</span>
-                  )}
-                </span>
-              </div>
-              <div className='flex justify-between'>
-                <span
-                  className='text-sm opacity-60'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  Margen:
-                </span>
-                <span
-                  className='font-bold'
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {formatPrice(product.price - product.production_cost)}
-                </span>
-              </div>
-              <div className='flex justify-between'>
-                <span
-                  className='text-sm opacity-60'
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  Stock:
-                </span>
-                <span
-                  className='font-bold'
+            No hay productos registrados
+          </p>
+          <p
+            className='text-sm opacity-40 mt-2'
+            style={{ color: 'var(--color-text)' }}
+          >
+            Puedes empezar a agregarlos para verlos aquí
+          </p>
+        </div>
+      ) : (
+        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+          {products.map((product) => (
+            <div
+              key={product.id}
+              className='rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow border-2 relative'
+              style={{
+                backgroundColor: 'var(--color-background-secondary)',
+                borderColor: 'var(--color-primary)',
+              }}
+            >
+              {product.uses_materia_prima && (
+                <div
+                  className='absolute top-3 right-3 p-1.5 rounded-lg'
                   style={{
-                    color: (product.uses_materia_prima
-                      ? (productStocks[product.id] || 0) < 10
-                      : product.stock < 10)
-                      ? '#ef4444'
-                      : 'var(--color-text)',
+                    backgroundColor: 'var(--color-primary)',
+                    opacity: 0.9,
+                  }}
+                  title='Usa Materia Prima'
+                >
+                  <Package size={16} className='text-white' />
+                </div>
+              )}
+              <div className='mb-3'>
+                <h3
+                  className='text-lg font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {product.name}
+                </h3>
+                <p
+                  className='text-sm opacity-60 capitalize'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {product.category}
+                </p>
+              </div>
+
+              <div className='space-y-1'>
+                <div className='flex justify-between'>
+                  <span
+                    className='text-sm opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Precio de Venta:
+                  </span>
+                  <span
+                    className='font-bold'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {formatPrice(product.price)}
+                  </span>
+                </div>
+                <div className='flex justify-between'>
+                  <span
+                    className='text-sm opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Costo:
+                  </span>
+                  <span
+                    className='font-bold opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {formatPrice(product.production_cost)}
+                    {product.uses_materia_prima && (
+                      <span className='text-xs ml-1'>(auto)</span>
+                    )}
+                  </span>
+                </div>
+                <div className='flex justify-between'>
+                  <span
+                    className='text-sm opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Margen:
+                  </span>
+                  <span
+                    className='font-bold'
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {formatPrice(product.price - product.production_cost)}
+                  </span>
+                </div>
+                <div className='flex justify-between'>
+                  <span
+                    className='text-sm opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Stock:
+                  </span>
+                  <span
+                    className='font-bold'
+                    style={{
+                      color: (
+                        product.uses_materia_prima
+                          ? (productStocks[product.id] || 0) < 10
+                          : product.stock < 10
+                      )
+                        ? '#ef4444'
+                        : 'var(--color-text)',
+                    }}
+                  >
+                    {product.uses_materia_prima
+                      ? `${formatNumber(productStocks[product.id] || 0)} (auto)`
+                      : formatNumber(product.stock)}
+                  </span>
+                </div>
+                <div className='flex justify-between'>
+                  <span
+                    className='text-sm opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Estado:
+                  </span>
+                  <span
+                    className='font-semibold'
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {product.active ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+              </div>
+
+              <div className='flex gap-2 mt-4'>
+                <button
+                  onClick={() => handleEdit(product)}
+                  className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
                   }}
                 >
-                  {product.uses_materia_prima
-                    ? `${formatNumber(productStocks[product.id] || 0)} (auto)`
-                    : formatNumber(product.stock)}
-                </span>
-              </div>
-              <div className='flex justify-between'>
-                <span
-                  className='text-sm opacity-60'
-                  style={{ color: 'var(--color-text)' }}
+                  <Edit2 size={14} />
+                  Editar
+                </button>
+                <button
+                  onClick={() => handleDelete(product.id)}
+                  className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
                 >
-                  Estado:
-                </span>
-                <span
-                  className='font-semibold'
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {product.active ? 'Activo' : 'Inactivo'}
-                </span>
+                  <Trash2 size={14} />
+                  Eliminar
+                </button>
               </div>
             </div>
-
-            <div className='flex gap-2 mt-4'>
-              <button
-                onClick={() => handleEdit(product)}
-                className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                }}
-              >
-                <Edit2 size={14} />
-                Editar
-              </button>
-              <button
-                onClick={() => handleDelete(product.id)}
-                className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                }}
-              >
-                <Trash2 size={14} />
-                Eliminar
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
