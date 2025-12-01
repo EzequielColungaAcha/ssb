@@ -108,16 +108,30 @@ export function SettingsView() {
       await db.init();
       const newLockState = !posLayoutLocked;
 
+      // If we’re locking, ask POSView to save current product order
       if (newLockState) {
         window.dispatchEvent(new CustomEvent('pos-layout-save-order'));
       }
 
-      const settings: AppSettings = {
+      // ✅ Load existing settings so we don't lose category_order (or any future fields)
+      const existingSettings = (await db.get<AppSettings>(
+        'app_settings',
+        'default'
+      )) || {
         id: 'default',
-        pos_layout_locked: newLockState,
+        pos_layout_locked: false,
+        // If it never existed, start with empty category order
+        category_order: [],
         updated_at: new Date().toISOString(),
       };
-      await db.put('app_settings', settings);
+
+      const updatedSettings: AppSettings = {
+        ...existingSettings, // keep category_order and other fields
+        pos_layout_locked: newLockState, // override only what we’re changing
+        updated_at: new Date().toISOString(),
+      };
+
+      await db.put('app_settings', updatedSettings);
       setPosLayoutLocked(newLockState);
 
       if (newLockState) {
