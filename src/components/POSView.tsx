@@ -14,6 +14,7 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
@@ -80,6 +81,7 @@ function SortableProductItem({
           {...attributes}
           {...listeners}
           className='absolute top-2 left-2 z-10 opacity-70 hover:opacity-100 transition-opacity bg-black/30 rounded p-1 backdrop-blur-sm cursor-move'
+          style={{ touchAction: 'none' }}
         >
           <GripVertical size={18} className='text-white' />
         </div>
@@ -142,7 +144,7 @@ function SortableCategory({
             {...attributes}
             {...listeners}
             className='opacity-70 hover:opacity-100 transition-opacity cursor-move'
-            style={{ color: 'var(--color-text)' }}
+            style={{ color: 'var(--color-text)', touchAction: 'none' }}
           >
             <GripVertical size={20} />
           </div>
@@ -193,6 +195,13 @@ export function POSView() {
     useSensor(PointerSensor, {
       activationConstraint: {
         distance: 8,
+      },
+    }),
+    useSensor(TouchSensor, {
+      // Small delay so tap still works as tap
+      activationConstraint: {
+        delay: 150,
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor, {
