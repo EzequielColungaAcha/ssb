@@ -111,6 +111,8 @@ export interface AppSettings {
   id: string;
   pos_layout_locked: boolean;
   category_order?: string[];
+  kds_enabled?: boolean;
+  kds_url?: string;
   updated_at: string;
 }
 

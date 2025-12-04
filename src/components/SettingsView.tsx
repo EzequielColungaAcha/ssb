@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Upload, X, Settings } from 'lucide-react';
+import { Palette, Type, Upload, X, Settings, Monitor } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLogo } from '../contexts/LogoContext';
@@ -15,6 +15,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
+import { db, AppSettings } from '../lib/indexeddb';
 
 export function SettingsView() {
   const { theme, themeConfig, updateThemeConfig } = useTheme();
@@ -26,6 +27,8 @@ export function SettingsView() {
   );
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [kdsEnabled, setKdsEnabled] = useState(false);
+  const [kdsUrl, setKdsUrl] = useState('http://192.168.1.100:3001');
 
   useEffect(() => {
     setColors(themeConfig);
@@ -35,6 +38,22 @@ export function SettingsView() {
     setAcronym(logoConfig.acronym);
     setLogoImage(logoConfig.logo_image);
   }, [logoConfig]);
+
+  useEffect(() => {
+    const loadKdsSettings = async () => {
+      try {
+        await db.init();
+        const settings = await db.get<AppSettings>('app_settings', 'default');
+        if (settings) {
+          setKdsEnabled(settings.kds_enabled || false);
+          setKdsUrl(settings.kds_url || 'http://192.168.1.100:3001');
+        }
+      } catch (error) {
+        console.error('Error loading KDS settings:', error);
+      }
+    };
+    loadKdsSettings();
+  }, []);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -90,6 +109,24 @@ export function SettingsView() {
     try {
       await updateThemeConfig(colors);
       await updateLogoConfig({ acronym, logo_image: logoImage });
+
+      await db.init();
+      const existingSettings =
+        (await db.get<AppSettings>('app_settings', 'default')) || {
+          id: 'default',
+          pos_layout_locked: false,
+          updated_at: new Date().toISOString(),
+        };
+
+      const updatedSettings: AppSettings = {
+        ...existingSettings,
+        kds_enabled: kdsEnabled,
+        kds_url: kdsUrl,
+        updated_at: new Date().toISOString(),
+      };
+
+      await db.put('app_settings', updatedSettings);
+
       toast.success(t.settings.successSaving);
     } catch (error) {
       console.error('Error saving settings:', error);
@@ -441,6 +478,51 @@ export function SettingsView() {
               {t.settings.resetToDefault}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className='mt-6'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Monitor size={24} />
+            Kitchen Display System (KDS)
+          </CardTitle>
+          <CardDescription>
+            Configurá la conexión al sistema de visualización de pedidos para
+            cocina
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-4'>
+          <div className='flex items-center gap-3'>
+            <input
+              type='checkbox'
+              id='kds-enabled'
+              checked={kdsEnabled}
+              onChange={(e) => setKdsEnabled(e.target.checked)}
+              className='w-5 h-5 rounded cursor-pointer'
+            />
+            <Label htmlFor='kds-enabled' className='cursor-pointer'>
+              Enviar pedidos al KDS automáticamente
+            </Label>
+          </div>
+
+          {kdsEnabled && (
+            <div>
+              <Label htmlFor='kds-url'>URL del servidor KDS</Label>
+              <Input
+                id='kds-url'
+                type='url'
+                value={kdsUrl}
+                onChange={(e) => setKdsUrl(e.target.value)}
+                placeholder='http://192.168.1.100:3001'
+                className='mt-2'
+              />
+              <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+                Ingresá la dirección IP y puerto del servidor KDS (ejemplo:
+                http://192.168.1.100:3001)
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

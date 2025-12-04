@@ -398,6 +398,40 @@ export function POSView() {
     setBillHistory([]);
   };
 
+  const sendToKDS = async (saleNumber: string, items: any[], total: number) => {
+    try {
+      await db.init();
+      const settings = await db.get<AppSettings>('app_settings', 'default');
+
+      if (!settings?.kds_enabled || !settings?.kds_url) {
+        return;
+      }
+
+      const response = await fetch(`${settings.kds_url}/api/orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sale_number: saleNumber,
+          items: items.map((item) => ({
+            product_name: item.product_name,
+            quantity: item.quantity,
+            product_price: item.product_price,
+          })),
+          total,
+          payment_method: paymentMethod,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to send order to KDS:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error sending order to KDS:', error);
+    }
+  };
+
   const completeSale = async () => {
     if (cart.length === 0) return;
 
@@ -462,6 +496,10 @@ export function POSView() {
         };
         await db.init();
         await db.put('sales', updatedSale);
+      }
+
+      if (saleData) {
+        await sendToKDS(saleData.sale_number, items, total);
       }
 
       await refreshProducts();
