@@ -17,8 +17,19 @@ import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
 import { db, AppSettings } from '../lib/indexeddb';
 
+// Helper function to calculate contrast color (black or white) based on background luminance
+function getContrastColor(hexColor: string): string {
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  // Calculate relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
 export function SettingsView() {
-  const { theme, themeConfig, updateThemeConfig } = useTheme();
+  const { themeConfig, updateThemeConfig } = useTheme();
   const { logoConfig, updateLogoConfig } = useLogo();
   const [colors, setColors] = useState(themeConfig);
   const [acronym, setAcronym] = useState(logoConfig.acronym);
@@ -29,6 +40,16 @@ export function SettingsView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [kdsEnabled, setKdsEnabled] = useState(false);
   const [kdsUrl, setKdsUrl] = useState('http://192.168.1.100:3001');
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Store functions in refs to avoid dependency issues
+  const updateThemeConfigRef = useRef(updateThemeConfig);
+  const updateLogoConfigRef = useRef(updateLogoConfig);
+  useEffect(() => {
+    updateThemeConfigRef.current = updateThemeConfig;
+    updateLogoConfigRef.current = updateLogoConfig;
+  }, [updateThemeConfig, updateLogoConfig]);
 
   useEffect(() => {
     setColors(themeConfig);
@@ -51,9 +72,58 @@ export function SettingsView() {
       } catch (error) {
         console.error('Error loading KDS settings:', error);
       }
+      // Small delay to let other effects settle before enabling auto-save
+      setTimeout(() => setHasLoaded(true), 100);
     };
     loadKdsSettings();
   }, []);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (!hasLoaded) return;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await updateThemeConfigRef.current(colors);
+        await updateLogoConfigRef.current({ acronym, logo_image: logoImage });
+
+        await db.init();
+        const existingSettings = (await db.get<AppSettings>(
+          'app_settings',
+          'default'
+        )) || {
+          id: 'default',
+          pos_layout_locked: false,
+          updated_at: new Date().toISOString(),
+        };
+
+        const updatedSettings: AppSettings = {
+          ...existingSettings,
+          kds_enabled: kdsEnabled,
+          kds_url: kdsUrl,
+          updated_at: new Date().toISOString(),
+        };
+
+        await db.put('app_settings', updatedSettings);
+      } catch (error) {
+        console.error('Error saving settings:', error);
+        toast.error(t.settings.errorSaving);
+      } finally {
+        setSaving(false);
+      }
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [hasLoaded, colors, acronym, logoImage, kdsEnabled, kdsUrl]);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -101,38 +171,6 @@ export function SettingsView() {
     setLogoImage(undefined);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await updateThemeConfig(colors);
-      await updateLogoConfig({ acronym, logo_image: logoImage });
-
-      await db.init();
-      const existingSettings =
-        (await db.get<AppSettings>('app_settings', 'default')) || {
-          id: 'default',
-          pos_layout_locked: false,
-          updated_at: new Date().toISOString(),
-        };
-
-      const updatedSettings: AppSettings = {
-        ...existingSettings,
-        kds_enabled: kdsEnabled,
-        kds_url: kdsUrl,
-        updated_at: new Date().toISOString(),
-      };
-
-      await db.put('app_settings', updatedSettings);
-
-      toast.success(t.settings.successSaving);
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      toast.error(t.settings.errorSaving);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -252,6 +290,51 @@ export function SettingsView() {
         </CardContent>
       </Card>
 
+      <Card className='my-6'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Monitor size={24} />
+            Kitchen Display System (KDS)
+          </CardTitle>
+          <CardDescription>
+            Configurá la conexión al sistema de visualización de pedidos para
+            cocina
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-4'>
+          <div className='flex items-center gap-3'>
+            <input
+              type='checkbox'
+              id='kds-enabled'
+              checked={kdsEnabled}
+              onChange={(e) => setKdsEnabled(e.target.checked)}
+              className='w-5 h-5 rounded cursor-pointer'
+            />
+            <Label htmlFor='kds-enabled' className='cursor-pointer'>
+              Enviar pedidos al KDS automáticamente
+            </Label>
+          </div>
+
+          {kdsEnabled && (
+            <div>
+              <Label htmlFor='kds-url'>URL del servidor KDS</Label>
+              <Input
+                id='kds-url'
+                type='url'
+                value={kdsUrl}
+                onChange={(e) => setKdsUrl(e.target.value)}
+                placeholder='http://192.168.1.100:3001'
+                className='mt-2'
+              />
+              <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+                Ingresá la dirección IP y puerto del servidor KDS (ejemplo:
+                http://192.168.1.100:3001)
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className='flex items-center gap-2'>
@@ -320,7 +403,7 @@ export function SettingsView() {
                     className='rounded-full px-2 py-1 text-[10px]'
                     style={{
                       backgroundColor: colors.light.primary,
-                      color: '#fff',
+                      color: getContrastColor(colors.light.primary),
                     }}
                   >
                     Badge
@@ -332,7 +415,7 @@ export function SettingsView() {
                     className='w-full rounded-md py-2 text-xs font-semibold'
                     style={{
                       backgroundColor: colors.light.primary,
-                      color: '#fff',
+                      color: getContrastColor(colors.light.primary),
                     }}
                   >
                     Botón Primario
@@ -341,11 +424,47 @@ export function SettingsView() {
                     className='w-full rounded-md py-2 text-xs font-semibold'
                     style={{
                       backgroundColor: colors.light.accent,
-                      color: '#fff',
+                      color: getContrastColor(colors.light.accent),
                     }}
                   >
                     Botón Acento
                   </button>
+
+                  {/* Primary and Accent on Secondary Background */}
+                  <div
+                    className='rounded-md p-2 mt-2 flex gap-2'
+                    style={{
+                      backgroundColor: colors.light.backgroundSecondary,
+                    }}
+                  >
+                    <span
+                      className='rounded px-2 py-1 text-[10px] font-semibold'
+                      style={{
+                        backgroundColor: colors.light.primary,
+                        color: getContrastColor(colors.light.primary),
+                      }}
+                    >
+                      Primario
+                    </span>
+                    <span
+                      className='rounded px-2 py-1 text-[10px] font-semibold'
+                      style={{
+                        backgroundColor: colors.light.accent,
+                        color: getContrastColor(colors.light.accent),
+                      }}
+                    >
+                      Acento
+                    </span>
+                    <span
+                      className='rounded px-2 py-1 text-[10px]'
+                      style={{
+                        color: colors.light.primary,
+                        border: `1px solid ${colors.light.primary}`,
+                      }}
+                    >
+                      Outline
+                    </span>
+                  </div>
 
                   <div
                     className='rounded-md p-2 mt-2'
@@ -358,6 +477,20 @@ export function SettingsView() {
                     </div>
                     <div className='text-[10px] opacity-80'>
                       Texto con color principal configurado.
+                    </div>
+                    <div className='flex gap-2 mt-2'>
+                      <span
+                        className='text-[10px] font-semibold'
+                        style={{ color: colors.light.primary }}
+                      >
+                        Texto Primario
+                      </span>
+                      <span
+                        className='text-[10px] font-semibold'
+                        style={{ color: colors.light.accent }}
+                      >
+                        Texto Acento
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -425,7 +558,7 @@ export function SettingsView() {
                     className='rounded-full px-2 py-1 text-[10px]'
                     style={{
                       backgroundColor: colors.dark.primary,
-                      color: '#fff',
+                      color: getContrastColor(colors.dark.primary),
                     }}
                   >
                     Badge
@@ -437,7 +570,7 @@ export function SettingsView() {
                     className='w-full rounded-md py-2 text-xs font-semibold'
                     style={{
                       backgroundColor: colors.dark.primary,
-                      color: '#fff',
+                      color: getContrastColor(colors.dark.primary),
                     }}
                   >
                     Botón Primario
@@ -446,11 +579,47 @@ export function SettingsView() {
                     className='w-full rounded-md py-2 text-xs font-semibold'
                     style={{
                       backgroundColor: colors.dark.accent,
-                      color: '#fff',
+                      color: getContrastColor(colors.dark.accent),
                     }}
                   >
                     Botón Acento
                   </button>
+
+                  {/* Primary and Accent on Secondary Background */}
+                  <div
+                    className='rounded-md p-2 mt-2 flex gap-2'
+                    style={{
+                      backgroundColor: colors.dark.backgroundSecondary,
+                    }}
+                  >
+                    <span
+                      className='rounded px-2 py-1 text-[10px] font-semibold'
+                      style={{
+                        backgroundColor: colors.dark.primary,
+                        color: getContrastColor(colors.dark.primary),
+                      }}
+                    >
+                      Primario
+                    </span>
+                    <span
+                      className='rounded px-2 py-1 text-[10px] font-semibold'
+                      style={{
+                        backgroundColor: colors.dark.accent,
+                        color: getContrastColor(colors.dark.accent),
+                      }}
+                    >
+                      Acento
+                    </span>
+                    <span
+                      className='rounded px-2 py-1 text-[10px]'
+                      style={{
+                        color: colors.dark.primary,
+                        border: `1px solid ${colors.dark.primary}`,
+                      }}
+                    >
+                      Outline
+                    </span>
+                  </div>
 
                   <div
                     className='rounded-md p-2 mt-2'
@@ -464,65 +633,39 @@ export function SettingsView() {
                     <div className='text-[10px] opacity-80'>
                       Texto con color principal configurado.
                     </div>
+                    <div className='flex gap-2 mt-2'>
+                      <span
+                        className='text-[10px] font-semibold'
+                        style={{ color: colors.dark.primary }}
+                      >
+                        Texto Primario
+                      </span>
+                      <span
+                        className='text-[10px] font-semibold'
+                        style={{ color: colors.dark.accent }}
+                      >
+                        Texto Acento
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className='flex gap-3 pt-4'>
-            <Button onClick={handleSave} disabled={saving} variant='secondary'>
-              {saving ? t.settings.saving : t.settings.saveChanges}
-            </Button>
+          <div className='flex gap-3 pt-4 items-center'>
             <Button onClick={handleReset} variant='secondary'>
               {t.settings.resetToDefault}
             </Button>
+            {saving && (
+              <span
+                className='text-sm opacity-60'
+                style={{ color: 'var(--color-text)' }}
+              >
+                {t.settings.saving}
+              </span>
+            )}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card className='mt-6'>
-        <CardHeader>
-          <CardTitle className='flex items-center gap-2'>
-            <Monitor size={24} />
-            Kitchen Display System (KDS)
-          </CardTitle>
-          <CardDescription>
-            Configurá la conexión al sistema de visualización de pedidos para
-            cocina
-          </CardDescription>
-        </CardHeader>
-        <CardContent className='space-y-4'>
-          <div className='flex items-center gap-3'>
-            <input
-              type='checkbox'
-              id='kds-enabled'
-              checked={kdsEnabled}
-              onChange={(e) => setKdsEnabled(e.target.checked)}
-              className='w-5 h-5 rounded cursor-pointer'
-            />
-            <Label htmlFor='kds-enabled' className='cursor-pointer'>
-              Enviar pedidos al KDS automáticamente
-            </Label>
-          </div>
-
-          {kdsEnabled && (
-            <div>
-              <Label htmlFor='kds-url'>URL del servidor KDS</Label>
-              <Input
-                id='kds-url'
-                type='url'
-                value={kdsUrl}
-                onChange={(e) => setKdsUrl(e.target.value)}
-                placeholder='http://192.168.1.100:3001'
-                className='mt-2'
-              />
-              <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
-                Ingresá la dirección IP y puerto del servidor KDS (ejemplo:
-                http://192.168.1.100:3001)
-              </p>
-            </div>
-          )}
         </CardContent>
       </Card>
 

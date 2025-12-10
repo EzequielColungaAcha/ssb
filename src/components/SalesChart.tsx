@@ -24,85 +24,66 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
 
   const getTimeKey = useCallback(
-    (date: Date, now: Date): { key: string; sortDate: Date } | null => {
+    (date: Date): { key: string; sortDate: Date } => {
       switch (timeFrame) {
         case 'hour': {
-          const hoursDiff = Math.floor(
-            (now.getTime() - date.getTime()) / (1000 * 60 * 60)
-          );
-          if (hoursDiff < 24) {
-            const sortDate = new Date(date);
-            sortDate.setMinutes(0, 0, 0);
-            return { key: `${date.getHours()}:00`, sortDate };
-          }
-          return null;
+          const sortDate = new Date(date);
+          sortDate.setMinutes(0, 0, 0);
+          return { key: `${date.getHours()}:00`, sortDate };
         }
 
         case 'day': {
-          const daysDiff = Math.floor(
-            (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
-          );
-          if (daysDiff < 30) {
-            const sortDate = new Date(date);
-            sortDate.setHours(0, 0, 0, 0);
-            return {
-              key: date.toLocaleDateString('es-AR', {
-                month: 'short',
-                day: 'numeric',
-              }),
-              sortDate,
-            };
-          }
-          return null;
+          const sortDate = new Date(date);
+          sortDate.setHours(0, 0, 0, 0);
+          return {
+            key: date.toLocaleDateString('es-AR', {
+              month: 'short',
+              day: 'numeric',
+            }),
+            sortDate,
+          };
         }
 
         case 'week': {
-          const weeksDiff = Math.floor(
-            (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24 * 7)
-          );
-          if (weeksDiff < 12) {
-            const weekStart = new Date(date);
-            weekStart.setDate(date.getDate() - date.getDay());
-            weekStart.setHours(0, 0, 0, 0);
-            return {
-              key: `Sem ${weekStart.toLocaleDateString('es-AR', {
-                month: 'short',
-                day: 'numeric',
-              })}`,
-              sortDate: weekStart,
-            };
-          }
-          return null;
+          const weekStart = new Date(date);
+          weekStart.setDate(date.getDate() - date.getDay());
+          weekStart.setHours(0, 0, 0, 0);
+          return {
+            key: `Sem ${weekStart.toLocaleDateString('es-AR', {
+              month: 'short',
+              day: 'numeric',
+            })}`,
+            sortDate: weekStart,
+          };
         }
 
         case 'month': {
-          const monthsDiff =
-            (now.getFullYear() - date.getFullYear()) * 12 +
-            (now.getMonth() - date.getMonth());
-          if (monthsDiff < 12) {
-            const sortDate = new Date(date.getFullYear(), date.getMonth(), 1);
-            return {
-              key: date.toLocaleDateString('es-AR', {
-                year: 'numeric',
-                month: 'short',
-              }),
-              sortDate,
-            };
-          }
-          return null;
+          const sortDate = new Date(date.getFullYear(), date.getMonth(), 1);
+          return {
+            key: date.toLocaleDateString('es-AR', {
+              year: 'numeric',
+              month: 'short',
+            }),
+            sortDate,
+          };
         }
 
         case 'year': {
-          const yearsDiff = now.getFullYear() - date.getFullYear();
-          if (yearsDiff < 5) {
-            const sortDate = new Date(date.getFullYear(), 0, 1);
-            return { key: date.getFullYear().toString(), sortDate };
-          }
-          return null;
+          const sortDate = new Date(date.getFullYear(), 0, 1);
+          return { key: date.getFullYear().toString(), sortDate };
         }
 
-        default:
-          return null;
+        default: {
+          const defaultSortDate = new Date(date);
+          defaultSortDate.setHours(0, 0, 0, 0);
+          return {
+            key: date.toLocaleDateString('es-AR', {
+              month: 'short',
+              day: 'numeric',
+            }),
+            sortDate: defaultSortDate,
+          };
+        }
       }
     },
     [timeFrame]
@@ -114,7 +95,6 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
       return;
     }
 
-    const now = new Date();
     const groupedData: {
       [key: string]: { value: number; count: number; minDate: Date };
     } = {};
@@ -122,10 +102,7 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
     if (chartMode === 'sales') {
       sales.forEach((sale) => {
         const saleDate = new Date(sale.completed_at);
-        const keyResult = getTimeKey(saleDate, now);
-        if (!keyResult) return;
-
-        const { key, sortDate } = keyResult;
+        const { key, sortDate } = getTimeKey(saleDate);
 
         if (!groupedData[key]) {
           groupedData[key] = { value: 0, count: 0, minDate: sortDate };
@@ -146,10 +123,7 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
         const saleDate = saleIdToDate.get(item.sale_id);
         if (!saleDate) return;
 
-        const keyResult = getTimeKey(saleDate, now);
-        if (!keyResult) return;
-
-        const { key, sortDate } = keyResult;
+        const { key, sortDate } = getTimeKey(saleDate);
 
         if (!groupedData[key]) {
           groupedData[key] = { value: 0, count: 0, minDate: sortDate };

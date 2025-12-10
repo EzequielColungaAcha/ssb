@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Wallet,
   Plus,
@@ -20,6 +20,79 @@ import { formatPrice, formatNumber } from '../lib/utils';
 import { Button } from './ui/button';
 import { useTheme } from '../contexts/ThemeContext';
 
+// Helper to get readable text color (black or white) based on background luminance
+function getReadableTextColor(hex: string): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return '#FFFFFF';
+
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+
+  const [R, G, B] = [r, g, b].map((v) =>
+    v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  );
+
+  const luminance = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  return luminance > 0.5 ? '#000000' : '#FFFFFF';
+}
+
+// Helper to get complementary color (180° hue rotation)
+function getComplementaryColor(hex: string): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return hex;
+
+  const r = parseInt(clean.slice(0, 2), 16) / 255;
+  const g = parseInt(clean.slice(2, 4), 16) / 255;
+  const b = parseInt(clean.slice(4, 6), 16) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+
+  let h = 0;
+  let s = 0;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        break;
+      case g:
+        h = ((b - r) / d + 2) / 6;
+        break;
+      case b:
+        h = ((r - g) / d + 4) / 6;
+        break;
+    }
+  }
+
+  // Rotate hue by 180°
+  h = (h + 0.5) % 1;
+
+  // Convert HSL back to RGB
+  const hue2rgb = (p: number, q: number, t: number) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const rNew = Math.round(hue2rgb(p, q, h + 1 / 3) * 255);
+  const gNew = Math.round(hue2rgb(p, q, h) * 255);
+  const bNew = Math.round(hue2rgb(p, q, h - 1 / 3) * 255);
+
+  return `#${rNew.toString(16).padStart(2, '0')}${gNew
+    .toString(16)
+    .padStart(2, '0')}${bNew.toString(16).padStart(2, '0')}`;
+}
+
 export function CashDrawerView() {
   const {
     bills,
@@ -29,8 +102,18 @@ export function CashDrawerView() {
     resetCashDrawer,
     loading,
   } = useCashDrawer();
-  const { theme } = useTheme();
+  const { theme, themeConfig } = useTheme();
   const { getSaleById, getSaleItems } = useSales();
+
+  const { complementaryColor, complementaryTextColor } = useMemo(() => {
+    const primaryColor = themeConfig[theme].primary;
+    const complementary = getComplementaryColor(primaryColor);
+    return {
+      complementaryColor: complementary,
+      complementaryTextColor: getReadableTextColor(complementary),
+    };
+  }, [theme, themeConfig]);
+
   const [editingBill, setEditingBill] = useState<number | null>(null);
   const [newQuantity, setNewQuantity] = useState('');
   const [showMovements, setShowMovements] = useState(false);
@@ -42,12 +125,30 @@ export function CashDrawerView() {
   const [filterMovementType, setFilterMovementType] = useState<string>('all');
   const [filterBillDenomination, setFilterBillDenomination] =
     useState<string>('all');
+  const [saleNumbers, setSaleNumbers] = useState<Record<string, string>>({});
 
   const loadMovements = useCallback(async () => {
     setLoadingMovements(true);
     const data = await getCashMovements();
     setMovements(data);
+
+    // Fetch sale numbers for movements with sale_id
+    const saleIds = data
+      .filter((m) => m.sale_id)
+      .map((m) => m.sale_id as string);
+    const uniqueSaleIds = [...new Set(saleIds)];
+
+    const numbersMap: Record<string, string> = {};
+    for (const saleId of uniqueSaleIds) {
+      const sale = await getSaleById(saleId);
+      if (sale) {
+        numbersMap[saleId] = sale.sale_number;
+      }
+    }
+    setSaleNumbers(numbersMap);
+
     setLoadingMovements(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getCashMovements]);
 
   useEffect(() => {
@@ -338,7 +439,11 @@ export function CashDrawerView() {
               <button
                 onClick={() => handleQuickAdjust(bill.denomination, -1)}
                 disabled={bill.quantity === 0}
-                className='flex-1 py-2 px-3 rounded bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1'
+                className='flex-1 py-2 px-3 rounded hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1'
+                style={{
+                  backgroundColor: complementaryColor,
+                  color: complementaryTextColor,
+                }}
               >
                 <Minus size={16} />
                 {t.cashDrawer.remove}
@@ -541,7 +646,9 @@ export function CashDrawerView() {
                                     color: 'var(--color-accent)',
                                   }}
                                 >
-                                  ID: {movement.sale_id.slice(0, 8)}
+                                  Venta #
+                                  {saleNumbers[movement.sale_id] ||
+                                    movement.sale_id.slice(0, 8)}
                                 </button>
                               )}
                             </div>

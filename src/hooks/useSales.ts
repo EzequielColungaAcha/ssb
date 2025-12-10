@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { db, Sale, SaleItem } from '../lib/indexeddb';
+import { db, Sale, SaleItem, Product } from '../lib/indexeddb';
 
 export function useSales() {
   const [sales, setSales] = useState<Sale[]>([]);
@@ -13,7 +13,11 @@ export function useSales() {
     try {
       await db.init();
       const data = await db.getAll<Sale>('sales');
-      const sorted = data.sort((a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime());
+      const sorted = data.sort(
+        (a, b) =>
+          new Date(b.completed_at).getTime() -
+          new Date(a.completed_at).getTime()
+      );
       setSales(sorted);
     } catch (error) {
       console.error('Error loading sales:', error);
@@ -23,7 +27,13 @@ export function useSales() {
   };
 
   const createSale = async (
-    items: Array<{ product_id: string; product_name: string; product_price: number; production_cost: number; quantity: number }>,
+    items: Array<{
+      product_id: string;
+      product_name: string;
+      product_price: number;
+      production_cost: number;
+      quantity: number;
+    }>,
     paymentMethod: string,
     cashReceived?: number,
     billsReceived?: Record<number, number>,
@@ -31,16 +41,22 @@ export function useSales() {
   ) => {
     try {
       await db.init();
-      const totalAmount = items.reduce((sum, item) => sum + item.product_price * item.quantity, 0);
+      const totalAmount = items.reduce(
+        (sum, item) => sum + item.product_price * item.quantity,
+        0
+      );
       const changeGiven = cashReceived ? cashReceived - totalAmount : undefined;
 
       const allSales = await db.getAll<Sale>('sales');
-      const lastSaleNumber = allSales.length > 0
-        ? Math.max(...allSales.map(s => {
-            const numStr = s.sale_number.replace(/^S-/, '');
-            return parseInt(numStr) || 0;
-          }))
-        : 0;
+      const lastSaleNumber =
+        allSales.length > 0
+          ? Math.max(
+              ...allSales.map((s) => {
+                const numStr = s.sale_number.replace(/^S-/, '');
+                return parseInt(numStr) || 0;
+              })
+            )
+          : 0;
       const saleNumber = String(lastSaleNumber + 1);
       const now = new Date().toISOString();
 
@@ -76,7 +92,7 @@ export function useSales() {
       }
 
       for (const item of items) {
-        const product = await db.get('products', item.product_id);
+        const product = await db.get<Product>('products', item.product_id);
         if (product && !product.uses_materia_prima) {
           const updatedProduct = {
             ...product,
@@ -108,7 +124,7 @@ export function useSales() {
   const getSaleById = async (saleId: string): Promise<Sale | null> => {
     try {
       await db.init();
-      return await db.get<Sale>('sales', saleId);
+      return (await db.get<Sale>('sales', saleId)) ?? null;
     } catch (error) {
       console.error('Error loading sale:', error);
       return null;

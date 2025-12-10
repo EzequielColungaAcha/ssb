@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   Trash2,
@@ -6,9 +6,11 @@ import {
   Banknote,
   RotateCcw,
   Undo,
-  GripVertical,
   Lock,
   Unlock,
+  Eye,
+  ChefHat,
+  CheckCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -39,6 +41,30 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 interface CartItem extends Product {
+  quantity: number;
+}
+
+interface KDSOrderItem {
+  product_name: string;
+  quantity: number;
+  product_price: number;
+}
+
+interface KDSOrder {
+  id: string;
+  sale_number: string;
+  items: KDSOrderItem[];
+  total: number;
+  status: 'preparing' | 'finished';
+  created_at: string;
+  finished_at?: string;
+}
+
+interface SaleItem {
+  product_id: string;
+  product_name: string;
+  product_price: number;
+  production_cost: number;
   quantity: number;
 }
 
@@ -74,23 +100,21 @@ function SortableProductItem({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    touchAction: isLocked ? 'auto' : 'none',
   };
 
   return (
-    <div ref={setNodeRef} style={style} className='relative'>
-      {!isLocked && (
-        <div
-          {...attributes}
-          {...listeners}
-          className='absolute top-2 left-2 z-10 opacity-70 hover:opacity-100 transition-opacity bg-black/30 rounded p-1 backdrop-blur-sm cursor-move'
-          style={{ touchAction: 'none' }}
-        >
-          <GripVertical size={18} className='text-white' />
-        </div>
-      )}
+    <div
+      ref={setNodeRef}
+      style={style}
+      className='relative'
+      {...(isLocked ? {} : { ...attributes, ...listeners })}
+    >
       <button
         onClick={() => onAddToCart(product)}
-        className='w-full p-6 rounded-lg shadow-md hover:shadow-xl transition-all duration-200 hover:scale-105'
+        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 ${
+          isLocked ? 'hover:shadow-xl hover:scale-105' : 'cursor-move'
+        }`}
         style={{
           backgroundColor: 'var(--color-primary)',
           color: 'var(--color-on-primary)',
@@ -140,24 +164,18 @@ function SortableCategory({
 
   return (
     <div ref={setNodeRef} style={style} className='mb-8'>
-      <div className='flex items-center gap-2 mb-4'>
-        {!isLocked && (
-          <div
-            {...attributes}
-            {...listeners}
-            className='opacity-70 hover:opacity-100 transition-opacity cursor-move'
-            style={{ color: 'var(--color-text)', touchAction: 'none' }}
-          >
-            <GripVertical size={20} />
-          </div>
-        )}
-        <h2
-          className='text-xl font-semibold capitalize'
-          style={{ color: 'var(--color-text)' }}
-        >
-          {category}
-        </h2>
-      </div>
+      <h2
+        {...(isLocked ? {} : { ...attributes, ...listeners })}
+        className={`text-xl font-semibold capitalize mb-4 ${
+          isLocked ? '' : 'cursor-move hover:opacity-80 transition-opacity'
+        }`}
+        style={{
+          color: 'var(--color-text)',
+          touchAction: isLocked ? 'auto' : 'none',
+        }}
+      >
+        {category}
+      </h2>
       {children}
     </div>
   );
@@ -192,6 +210,12 @@ export function POSView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [nextSaleNumber, setNextSaleNumber] = useState<number | null>(null);
+  const [kdsEnabled, setKdsEnabled] = useState(false);
+  const [kdsUrl, setKdsUrl] = useState('');
+  const [showKdsPanel, setShowKdsPanel] = useState(false);
+  const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
+  const kdsPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finishedOrdersRef = useRef<Set<string>>(new Set());
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -220,6 +244,8 @@ export function POSView() {
         if (settings.category_order) {
           setCategoryOrder(settings.category_order);
         }
+        setKdsEnabled(settings.kds_enabled || false);
+        setKdsUrl(settings.kds_url || '');
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -398,7 +424,11 @@ export function POSView() {
     setBillHistory([]);
   };
 
-  const sendToKDS = async (saleNumber: string, items: any[], total: number) => {
+  const sendToKDS = async (
+    saleNumber: string,
+    items: SaleItem[],
+    total: number
+  ) => {
     try {
       await db.init();
       const settings = await db.get<AppSettings>('app_settings', 'default');
@@ -429,6 +459,82 @@ export function POSView() {
       }
     } catch (error) {
       console.error('Error sending order to KDS:', error);
+    }
+  };
+
+  const fetchKdsOrders = useCallback(async () => {
+    if (!kdsEnabled || !kdsUrl) return;
+
+    try {
+      const response = await fetch(`${kdsUrl}/api/orders`);
+      if (response.ok) {
+        const orders: KDSOrder[] = await response.json();
+
+        // Check for newly finished orders
+        orders.forEach((order) => {
+          if (
+            order.status === 'finished' &&
+            !finishedOrdersRef.current.has(order.id)
+          ) {
+            finishedOrdersRef.current.add(order.id);
+            // Auto-remove after 2 seconds
+            setTimeout(() => {
+              setKdsOrders((prev) => prev.filter((o) => o.id !== order.id));
+              finishedOrdersRef.current.delete(order.id);
+            }, 2000);
+          }
+        });
+
+        setKdsOrders(orders);
+      }
+    } catch (error) {
+      console.error('Error fetching KDS orders:', error);
+    }
+  }, [kdsEnabled, kdsUrl]);
+
+  const updateKdsOrderStatus = async (
+    orderId: string,
+    status: 'preparing' | 'finished'
+  ) => {
+    if (!kdsUrl) return;
+
+    try {
+      const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      if (response.ok) {
+        if (status === 'finished') {
+          finishedOrdersRef.current.add(orderId);
+          // Auto-remove after 2 seconds
+          setTimeout(() => {
+            setKdsOrders((prev) => prev.filter((o) => o.id !== orderId));
+            finishedOrdersRef.current.delete(orderId);
+          }, 2000);
+        }
+        // Update local state immediately
+        setKdsOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId
+              ? {
+                  ...order,
+                  status,
+                  finished_at:
+                    status === 'finished'
+                      ? new Date().toISOString()
+                      : undefined,
+                }
+              : order
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error updating KDS order status:', error);
+      toast.error('Error al actualizar el estado del pedido');
     }
   };
 
@@ -678,12 +784,6 @@ export function POSView() {
 
       await db.put('app_settings', updatedSettings);
       setIsLayoutLocked(newLockState);
-
-      toast.success(
-        newLockState
-          ? 'Diseño de POS bloqueado. No se podrán mover productos hasta desbloquear.'
-          : 'Diseño de POS desbloqueado. Ahora puedes reorganizar los productos.'
-      );
     } catch (error) {
       console.error('Error toggling POS layout lock:', error);
       toast.error('Error al cambiar el estado del bloqueo');
@@ -709,6 +809,21 @@ export function POSView() {
     setSortedProducts(sorted);
   }, [products]);
 
+  // KDS polling when panel is open
+  useEffect(() => {
+    if (showKdsPanel && kdsEnabled && kdsUrl) {
+      fetchKdsOrders();
+      kdsPollingRef.current = setInterval(fetchKdsOrders, 3000);
+    }
+
+    return () => {
+      if (kdsPollingRef.current) {
+        clearInterval(kdsPollingRef.current);
+        kdsPollingRef.current = null;
+      }
+    };
+  }, [showKdsPanel, kdsEnabled, kdsUrl, fetchKdsOrders]);
+
   return (
     <DndContext
       sensors={sensors}
@@ -721,22 +836,34 @@ export function POSView() {
         style={{ backgroundColor: 'var(--color-background)' }}
       >
         <div className='flex-1 p-6 overflow-auto scrollbar-hide relative'>
-          <button
-            type='button'
-            onClick={toggleLayoutLock}
-            className='absolute top-2 right-2 z-20 p-2 transition-transform'
-            aria-label={
-              isLayoutLocked
-                ? 'Desbloquear diseño del POS'
-                : 'Bloquear diseño del POS'
-            }
-          >
-            {isLayoutLocked ? (
-              <Lock size={20} style={{ color: 'var(--color-accent)' }} />
-            ) : (
-              <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+          <div className='absolute top-2 right-2 z-20 flex items-center gap-2'>
+            {kdsEnabled && (
+              <button
+                type='button'
+                onClick={() => setShowKdsPanel(true)}
+                className='p-2 transition-transform'
+                aria-label='Ver pedidos KDS'
+              >
+                <Eye size={20} style={{ color: 'var(--color-accent)' }} />
+              </button>
             )}
-          </button>
+            <button
+              type='button'
+              onClick={toggleLayoutLock}
+              className='p-2 transition-transform'
+              aria-label={
+                isLayoutLocked
+                  ? 'Desbloquear diseño del POS'
+                  : 'Bloquear diseño del POS'
+              }
+            >
+              {isLayoutLocked ? (
+                <Lock size={20} style={{ color: 'var(--color-accent)' }} />
+              ) : (
+                <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+              )}
+            </button>
+          </div>
           <SortableContext
             items={categories.map((cat) => `category-${cat}`)}
             disabled={isLayoutLocked}
@@ -901,7 +1028,10 @@ export function POSView() {
                 onClick={() => setShowPayment(true)}
                 disabled={cart.length === 0}
                 className='w-full py-4 rounded-lg text-white font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:opacity-90'
-                style={{ backgroundColor: 'var(--color-accent)' }}
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'var(--color-on-accent)',
+                }}
               >
                 Proceder al Pago
               </button>
@@ -1136,6 +1266,148 @@ export function POSView() {
         </div>
       </div>
 
+      {/* KDS Orders Panel */}
+      {showKdsPanel && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-4xl max-h-[90vh] rounded-xl shadow-2xl overflow-hidden flex flex-col'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b'
+              style={{ borderColor: 'var(--color-background-accent)' }}
+            >
+              <div className='flex items-center gap-3'>
+                <ChefHat size={24} style={{ color: 'var(--color-primary)' }} />
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Pedidos en Cocina (KDS)
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowKdsPanel(false)}
+                className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={20} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className='flex-1 overflow-auto p-6'>
+              {kdsOrders.length === 0 ? (
+                <div
+                  className='text-center py-12 opacity-60'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <ChefHat size={48} className='mx-auto mb-4 opacity-40' />
+                  <p>No hay pedidos en cocina</p>
+                </div>
+              ) : (
+                <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+                  {kdsOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      className={`rounded-lg p-4 border-2 transition-all duration-300 ${
+                        order.status === 'finished' ? 'opacity-50 scale-95' : ''
+                      }`}
+                      style={{
+                        backgroundColor: 'var(--color-background)',
+                        borderColor:
+                          order.status === 'preparing'
+                            ? 'var(--color-accent)'
+                            : 'var(--color-primary)',
+                      }}
+                    >
+                      <div className='flex items-center justify-between mb-3'>
+                        <span
+                          className='font-bold text-lg'
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          #{order.sale_number}
+                        </span>
+                        <span
+                          className='px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1'
+                          style={{
+                            backgroundColor:
+                              order.status === 'preparing'
+                                ? 'var(--color-accent)'
+                                : 'var(--color-primary)',
+                            color:
+                              order.status === 'preparing'
+                                ? 'var(--color-on-accent)'
+                                : 'var(--color-on-primary)',
+                          }}
+                        >
+                          {order.status === 'preparing' ? (
+                            <>
+                              <ChefHat size={12} />
+                              Preparando
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle size={12} />
+                              Listo
+                            </>
+                          )}
+                        </span>
+                      </div>
+
+                      <div className='space-y-2 mb-4'>
+                        {order.items.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className='flex justify-between text-sm'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            <span>
+                              {item.quantity}x {item.product_name}
+                            </span>
+                            <span className='opacity-60'>
+                              {formatPrice(item.product_price * item.quantity)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div
+                        className='flex justify-between items-center pt-3 border-t'
+                        style={{
+                          borderColor: 'var(--color-background-accent)',
+                        }}
+                      >
+                        <span
+                          className='font-bold'
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {formatPrice(order.total)}
+                        </span>
+
+                        {order.status === 'preparing' && (
+                          <button
+                            onClick={() =>
+                              updateKdsOrderStatus(order.id, 'finished')
+                            }
+                            className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
+                            style={{
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }}
+                          >
+                            Marcar Listo
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <DragOverlay>
         {activeProduct ? (
           <div className='opacity-80 rotate-3 scale-105 shadow-2xl'>
@@ -1156,13 +1428,16 @@ export function POSView() {
             </button>
           </div>
         ) : activeCategory ? (
-          <div className='opacity-80 scale-105 shadow-2xl bg-gray-800/90 backdrop-blur-sm rounded-lg p-4'>
-            <div className='flex items-center gap-2'>
-              <GripVertical size={20} className='text-white' />
-              <h2 className='text-xl font-semibold capitalize text-white'>
-                {activeCategory}
-              </h2>
-            </div>
+          <div
+            className='opacity-80 scale-105 shadow-2xl backdrop-blur-sm rounded-lg px-4 py-2'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <h2
+              className='text-xl font-semibold capitalize'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {activeCategory}
+            </h2>
           </div>
         ) : null}
       </DragOverlay>

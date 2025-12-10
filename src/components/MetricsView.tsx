@@ -10,15 +10,9 @@ import {
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
-import { db, SaleItem } from '../lib/indexeddb';
+import { db, SaleItem, ProductMateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
-
-interface DailySales {
-  date: string;
-  total: number;
-  count: number;
-}
 
 interface ProductSales {
   product_name: string;
@@ -31,7 +25,6 @@ export function MetricsView() {
   const { sales } = useSales();
   const { products } = useProducts();
   const { materiaPrima, calculateAvailableStock } = useMateriaPrima();
-  const [dailySales, setDailySales] = useState<DailySales[]>([]);
   const [topProducts, setTopProducts] = useState<ProductSales[]>([]);
   const [allSoldProducts, setAllSoldProducts] = useState<ProductSales[]>([]);
   const [mostProfitableProducts, setMostProfitableProducts] = useState<
@@ -169,32 +162,11 @@ export function MetricsView() {
       filteredSaleItems.map((item) => item.sale_id)
     );
 
-    const salesByDate: { [key: string]: { total: number; count: number } } = {};
     const filteredSales = dateFilteredSales.filter(
       (sale) => categoryFilter === 'all' || relevantSaleIds.has(sale.id)
     );
 
     setFilteredSalesState(filteredSales);
-
-    filteredSales.forEach((sale) => {
-      const date = new Date(sale.completed_at).toLocaleDateString('es-AR');
-      if (!salesByDate[date]) {
-        salesByDate[date] = { total: 0, count: 0 };
-      }
-      salesByDate[date].total += sale.total_amount;
-      salesByDate[date].count += 1;
-    });
-
-    const dailyData = Object.entries(salesByDate)
-      .map(([date, data]) => ({
-        date,
-        total: data.total,
-        count: data.count,
-      }))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .slice(-7);
-
-    setDailySales(dailyData);
 
     const filteredSaleIds = new Set(filteredSales.map((s) => s.id));
     const dateAndCategoryFilteredItems = filteredSaleItems.filter((item) =>
@@ -277,7 +249,7 @@ export function MetricsView() {
   );
 
   const [productMateriaPrimaLinks, setProductMateriaPrimaLinks] = useState<
-    any[]
+    ProductMateriaPrima[]
   >([]);
 
   const filteredRawMaterials = (() => {
@@ -315,8 +287,6 @@ export function MetricsView() {
 
   const totalInventoryValue = productsInventoryValue + rawMaterialsValue;
 
-  // const maxDailySale = Math.max(...dailySales.map((d) => d.total), 1);
-
   const categories = [
     { value: 'all', label: 'Todas las Categorías' },
     { value: 'hamburguesas', label: 'Hamburguesas' },
@@ -339,7 +309,9 @@ export function MetricsView() {
   useEffect(() => {
     const loadLinks = async () => {
       await db.init();
-      const links = await db.getAll('product_materia_prima');
+      const links = await db.getAll<ProductMateriaPrima>(
+        'product_materia_prima'
+      );
       setProductMateriaPrimaLinks(links);
     };
     loadLinks();

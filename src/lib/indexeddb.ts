@@ -329,7 +329,7 @@ class IndexedDBService {
       this.getAll<ProductMateriaPrima>('product_materia_prima'),
     ]);
 
-    const data: Record<string, any[]> = {
+    const data = {
       products,
       sales,
       sale_items,

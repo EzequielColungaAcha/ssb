@@ -79,11 +79,11 @@ function AppContent() {
 
   const navigation = [
     { id: 'pos' as View, label: t.nav.pos, icon: Store },
+    { id: 'cashdrawer' as View, label: t.nav.cashDrawer, icon: Wallet },
+    { id: 'sales' as View, label: t.nav.sales, icon: History },
     { id: 'products' as View, label: t.nav.products, icon: Package },
     { id: 'materiaprima' as View, label: 'Materia Prima', icon: Beef },
-    { id: 'sales' as View, label: t.nav.sales, icon: History },
     { id: 'metrics' as View, label: t.nav.metrics, icon: BarChart3 },
-    { id: 'cashdrawer' as View, label: t.nav.cashDrawer, icon: Wallet },
     { id: 'settings' as View, label: t.nav.settings, icon: Settings },
   ];
 

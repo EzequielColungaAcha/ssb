@@ -21,11 +21,7 @@ export function useCashDrawer() {
   const [bills, setBills] = useState<CashDrawerBill[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadBills();
-  }, []);
-
-  const initializeBills = async () => {
+  const initializeBills = useCallback(async () => {
     await db.init();
     for (const denomination of BILL_DENOMINATIONS) {
       const existing = await db.getAllByIndex<CashDrawer>(
@@ -43,9 +39,9 @@ export function useCashDrawer() {
         await db.add('cash_drawer', newBill);
       }
     }
-  };
+  }, []);
 
-  const loadBills = async () => {
+  const loadBills = useCallback(async () => {
     try {
       await db.init();
       await initializeBills();
@@ -63,7 +59,7 @@ export function useCashDrawer() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [initializeBills]);
 
   const ensureBillExists = async (denomination: number) => {
     await db.init();
@@ -387,6 +383,10 @@ export function useCashDrawer() {
       throw error;
     }
   };
+
+  useEffect(() => {
+    loadBills();
+  }, [loadBills]);
 
   return {
     bills,

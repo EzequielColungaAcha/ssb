@@ -81,8 +81,12 @@ export function MateriaPrimaView() {
           try {
             await deleteMateriaPrima(id);
             toast.success('Materia prima eliminada exitosamente');
-          } catch (error: any) {
-            toast.error(error.message || 'Error al eliminar la materia prima');
+          } catch (error) {
+            toast.error(
+              error instanceof Error
+                ? error.message
+                : 'Error al eliminar la materia prima'
+            );
           }
         },
       },

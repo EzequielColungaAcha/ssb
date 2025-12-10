@@ -3,12 +3,13 @@ import { Calendar, Package, History } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { Sale, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { useTheme } from '../contexts/ThemeContext';
 
 export function SalesView() {
+  const { theme } = useTheme();
   const { sales, getSaleItems, loading } = useSales();
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
-  const [showBillsBreakdown, setShowBillsBreakdown] = useState(false);
 
   const loadSaleItems = useCallback(
     async (saleId: string) => {
@@ -33,7 +34,6 @@ export function SalesView() {
   useEffect(() => {
     if (selectedSale) {
       loadSaleItems(selectedSale.id);
-      setShowBillsBreakdown(false);
     }
   }, [loadSaleItems, selectedSale]);
 
@@ -102,7 +102,7 @@ export function SalesView() {
                   <div className='flex justify-between items-start mb-2'>
                     <div className='flex items-center gap-3'>
                       <div
-                        className='text-2xl font-bold opacity-40'
+                        className='text-2xl font-bold'
                         style={{
                           color:
                             selectedSale?.id === sale.id
@@ -249,7 +249,11 @@ export function SalesView() {
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-2 py-1 rounded'
+                                  className={`text-xs px-2 py-1 rounded ${
+                                    theme === 'light'
+                                      ? 'bg-emerald-800 text-emerald-100 ring-1 ring-emerald-900'
+                                      : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
+                                  }`}
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}
@@ -274,7 +278,11 @@ export function SalesView() {
                               .map(([denomination, quantity]) => (
                                 <span
                                   key={denomination}
-                                  className='text-xs bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 px-2 py-1 rounded'
+                                  className={`text-xs px-2 py-1 rounded ${
+                                    theme === 'light'
+                                      ? 'bg-rose-800 text-rose-100 ring-1 ring-rose-900'
+                                      : 'bg-rose-100 text-rose-800 ring-1 ring-rose-200'
+                                  }`}
                                 >
                                   {formatNumber(quantity)}x{' '}
                                   {formatPrice(Number(denomination))}
