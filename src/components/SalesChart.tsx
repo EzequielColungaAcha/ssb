@@ -29,7 +29,12 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
         case 'hour': {
           const sortDate = new Date(date);
           sortDate.setMinutes(0, 0, 0);
-          return { key: `${date.getHours()}:00`, sortDate };
+          const hour = date.getHours().toString().padStart(2, '0');
+          const dateStr = date.toLocaleDateString('es-AR', {
+            day: 'numeric',
+            month: 'short',
+          });
+          return { key: `${hour}:00|${dateStr}`, sortDate };
         }
 
         case 'day': {
@@ -265,6 +270,54 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                 fontSize={12}
                 tickLine={false}
                 axisLine={false}
+                tick={({ x, y, payload }) => {
+                  if (timeFrame === 'hour' && payload.value.includes('|')) {
+                    const [hour, date] = payload.value.split('|');
+                    return (
+                      <g transform={`translate(${x},${y})`}>
+                        <text
+                          x={0}
+                          y={0}
+                          dy={12}
+                          textAnchor='middle'
+                          fill='var(--color-text)'
+                          opacity={0.7}
+                          fontSize={12}
+                          fontWeight={600}
+                        >
+                          {hour}
+                        </text>
+                        <text
+                          x={0}
+                          y={0}
+                          dy={26}
+                          textAnchor='middle'
+                          fill='var(--color-text)'
+                          opacity={0.4}
+                          fontSize={10}
+                        >
+                          {date}
+                        </text>
+                      </g>
+                    );
+                  }
+                  return (
+                    <g transform={`translate(${x},${y})`}>
+                      <text
+                        x={0}
+                        y={0}
+                        dy={12}
+                        textAnchor='middle'
+                        fill='var(--color-text)'
+                        opacity={0.5}
+                        fontSize={12}
+                      >
+                        {payload.value}
+                      </text>
+                    </g>
+                  );
+                }}
+                height={50}
               />
               <YAxis
                 stroke='var(--color-text)'
@@ -288,13 +341,18 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                   const value = dataPoint.value;
                   const count = dataPoint.count;
 
+                  // Format label for hour view (split "14:00|11 dic" into two lines)
+                  const displayLabel = label.includes('|')
+                    ? label.replace('|', ' - ')
+                    : label;
+
                   return (
                     <div className='rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl'>
                       <div
                         className='font-medium mb-1'
                         style={{ color: 'var(--color-text)' }}
                       >
-                        {label}
+                        {displayLabel}
                       </div>
                       {chartMode === 'sales' ? (
                         <>

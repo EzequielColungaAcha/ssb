@@ -38,6 +38,7 @@ import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
+import { useTheme } from '../contexts/ThemeContext';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 interface CartItem extends Product {
@@ -55,7 +56,7 @@ interface KDSOrder {
   sale_number: string;
   items: KDSOrderItem[];
   total: number;
-  status: 'preparing' | 'finished';
+  status: 'pending' | 'preparing' | 'completed';
   created_at: string;
   finished_at?: string;
 }
@@ -192,6 +193,7 @@ export function POSView() {
     calculateAvailableStock,
     refresh: refreshMateriaPrima,
   } = useMateriaPrima();
+  const { syncThemeToKDS } = useTheme();
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
@@ -466,14 +468,17 @@ export function POSView() {
     if (!kdsEnabled || !kdsUrl) return;
 
     try {
-      const response = await fetch(`${kdsUrl}/api/orders`);
+      const response = await fetch(`${kdsUrl}/api/orders?status=pending`);
       if (response.ok) {
-        const orders: KDSOrder[] = await response.json();
+        const data = await response.json();
+        const orders: KDSOrder[] = (data.orders || []).filter(
+          (order: KDSOrder) => order.status === 'pending'
+        );
 
-        // Check for newly finished orders
+        // Check for newly completed orders
         orders.forEach((order) => {
           if (
-            order.status === 'finished' &&
+            order.status === 'completed' &&
             !finishedOrdersRef.current.has(order.id)
           ) {
             finishedOrdersRef.current.add(order.id);
@@ -494,12 +499,12 @@ export function POSView() {
 
   const updateKdsOrderStatus = async (
     orderId: string,
-    status: 'preparing' | 'finished'
+    status: 'pending' | 'preparing' | 'completed'
   ) => {
     if (!kdsUrl) return;
 
     try {
-      const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
+      const response = await fetch(`${kdsUrl}/api/orders/${orderId}/status`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -508,7 +513,7 @@ export function POSView() {
       });
 
       if (response.ok) {
-        if (status === 'finished') {
+        if (status === 'completed') {
           finishedOrdersRef.current.add(orderId);
           // Auto-remove after 2 seconds
           setTimeout(() => {
@@ -524,7 +529,7 @@ export function POSView() {
                   ...order,
                   status,
                   finished_at:
-                    status === 'finished'
+                    status === 'completed'
                       ? new Date().toISOString()
                       : undefined,
                 }
@@ -606,6 +611,8 @@ export function POSView() {
 
       if (saleData) {
         await sendToKDS(saleData.sale_number, items, total);
+        // Sync theme to KDS with each sale to ensure KDS has latest theme
+        await syncThemeToKDS();
       }
 
       await refreshProducts();
@@ -1310,12 +1317,14 @@ export function POSView() {
                     <div
                       key={order.id}
                       className={`rounded-lg p-4 border-2 transition-all duration-300 ${
-                        order.status === 'finished' ? 'opacity-50 scale-95' : ''
+                        order.status === 'completed'
+                          ? 'opacity-50 scale-95'
+                          : ''
                       }`}
                       style={{
                         backgroundColor: 'var(--color-background)',
                         borderColor:
-                          order.status === 'preparing'
+                          order.status === 'pending'
                             ? 'var(--color-accent)'
                             : 'var(--color-primary)',
                       }}
@@ -1331,24 +1340,24 @@ export function POSView() {
                           className='px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1'
                           style={{
                             backgroundColor:
-                              order.status === 'preparing'
+                              order.status === 'pending'
                                 ? 'var(--color-accent)'
                                 : 'var(--color-primary)',
                             color:
-                              order.status === 'preparing'
+                              order.status === 'pending'
                                 ? 'var(--color-on-accent)'
                                 : 'var(--color-on-primary)',
                           }}
                         >
-                          {order.status === 'preparing' ? (
+                          {order.status === 'pending' ? (
                             <>
                               <ChefHat size={12} />
-                              Preparando
+                              Pendiente
                             </>
                           ) : (
                             <>
                               <CheckCircle size={12} />
-                              Listo
+                              Entregado
                             </>
                           )}
                         </span>
@@ -1384,10 +1393,10 @@ export function POSView() {
                           {formatPrice(order.total)}
                         </span>
 
-                        {order.status === 'preparing' && (
+                        {order.status === 'pending' && (
                           <button
                             onClick={() =>
-                              updateKdsOrderStatus(order.id, 'finished')
+                              updateKdsOrderStatus(order.id, 'completed')
                             }
                             className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
                             style={{
@@ -1395,7 +1404,7 @@ export function POSView() {
                               color: 'var(--color-on-primary)',
                             }}
                           >
-                            Marcar Listo
+                            Marcar Entregado
                           </button>
                         )}
                       </div>

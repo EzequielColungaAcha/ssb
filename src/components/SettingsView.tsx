@@ -29,7 +29,7 @@ function getContrastColor(hexColor: string): string {
 }
 
 export function SettingsView() {
-  const { themeConfig, updateThemeConfig } = useTheme();
+  const { theme, themeConfig, updateThemeConfig, syncThemeToKDS } = useTheme();
   const { logoConfig, updateLogoConfig } = useLogo();
   const [colors, setColors] = useState(themeConfig);
   const [acronym, setAcronym] = useState(logoConfig.acronym);
@@ -110,6 +110,11 @@ export function SettingsView() {
         };
 
         await db.put('app_settings', updatedSettings);
+
+        // Sync theme to KDS after settings are saved using latest colors/mode
+        if (kdsEnabled && kdsUrl) {
+          await syncThemeToKDS(colors, theme);
+        }
       } catch (error) {
         console.error('Error saving settings:', error);
         toast.error(t.settings.errorSaving);

@@ -1,5 +1,11 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db, LogoConfig, ThemeConfig } from '../lib/indexeddb';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from 'react';
+import { db, LogoConfig, ThemeConfig, AppSettings } from '../lib/indexeddb';
 
 export type { ThemeConfig };
 
@@ -9,6 +15,10 @@ interface ThemeContextType {
   themeConfig: ThemeConfig;
   updateThemeConfig: (config: ThemeConfig) => Promise<void>;
   applyTheme: () => void;
+  syncThemeToKDS: (
+    configOverride?: ThemeConfig,
+    modeOverride?: 'light' | 'dark'
+  ) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -136,11 +146,56 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     applyThemeColors(config, theme);
   };
 
+  // Sync theme to KDS server
+  const syncThemeToKDS = useCallback(
+    async (configOverride?: ThemeConfig, modeOverride?: 'light' | 'dark') => {
+      try {
+        await db.init();
+        const settings = await db.get<AppSettings>('app_settings', 'default');
+
+        if (!settings?.kds_enabled || !settings?.kds_url) {
+          return;
+        }
+
+        const cfg = configOverride || themeConfig;
+        const modeToSend = modeOverride || theme;
+        const colors = cfg[modeToSend];
+        const themeData = {
+          mode: modeToSend,
+          colors: {
+            primary: colors.primary,
+            accent: colors.accent,
+            text: colors.text,
+            background: colors.background,
+            backgroundSecondary: colors.backgroundSecondary,
+            backgroundAccent: colors.backgroundAccent,
+          },
+        };
+
+        await fetch(`${settings.kds_url}/api/theme`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(themeData),
+        });
+      } catch (error) {
+        console.error('Error syncing theme to KDS:', error);
+      }
+    },
+    [theme, themeConfig]
+  );
+
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
   };
+
+  // Sync theme to KDS when theme changes
+  useEffect(() => {
+    if (isLoaded) {
+      syncThemeToKDS();
+    }
+  }, [theme, isLoaded, syncThemeToKDS]);
 
   const updateThemeConfig = async (config: ThemeConfig) => {
     try {
@@ -163,6 +218,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
       setThemeConfig(config);
       applyTheme(config);
+
+      // Sync updated theme colors to KDS immediately with explicit config/mode
+      await syncThemeToKDS(config, theme);
     } catch (error) {
       console.error('Failed to update theme config:', error);
       throw error;
@@ -177,6 +235,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         themeConfig,
         updateThemeConfig,
         applyTheme,
+        syncThemeToKDS,
         isLoading: !isLoaded,
       }}
     >
