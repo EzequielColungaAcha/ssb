@@ -44,6 +44,7 @@ export interface Sale {
   change_given?: number;
   bills_received?: Record<string, number>;
   bills_change?: Record<string, number>;
+  scheduled_time?: string; // ISO timestamp for when order should be ready
   completed_at: string;
   created_at: string;
 }

@@ -12,6 +12,8 @@ import {
   ChefHat,
   CheckCircle,
   Beef,
+  Clock,
+  Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -67,6 +69,7 @@ interface KDSOrder {
   items: KDSOrderItem[];
   total: number;
   status: 'pending' | 'preparing' | 'completed';
+  scheduled_time?: string;
   created_at: string;
   finished_at?: string;
 }
@@ -323,7 +326,7 @@ function SortableCategory({
 
 export function POSView() {
   const { products, refresh: refreshProducts, updateProduct } = useProducts();
-  const { createSale } = useSales();
+  const { createSale, updateSale, getSaleById, getSaleItems } = useSales();
   const { calculateOptimalChange, processChange, processCashReceived } =
     useCashDrawer();
   const {
@@ -382,6 +385,12 @@ export function POSView() {
     Record<string, Product[]>
   >({});
   const [comboPrice, setComboPrice] = useState(0);
+
+  // Scheduled time for order
+  const [scheduledTime, setScheduledTime] = useState<string>('');
+
+  // Editing order state
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
   const activeCombos = combos.filter((c) => c.active);
 
@@ -820,7 +829,8 @@ export function POSView() {
   const sendToKDS = async (
     saleNumber: string,
     items: SaleItem[],
-    total: number
+    total: number,
+    scheduledTimeISO?: string
   ) => {
     try {
       await db.init();
@@ -845,6 +855,7 @@ export function POSView() {
           })),
           total,
           payment_method: paymentMethod,
+          scheduled_time: scheduledTimeISO,
         }),
       });
 
@@ -882,7 +893,43 @@ export function POSView() {
           }
         });
 
-        setKdsOrders(orders);
+        // Sort orders by scheduled_time
+        // 1. Past scheduled time (overdue) first
+        // 2. Upcoming scheduled time (soonest first)
+        // 3. No scheduled time (ASAP) at the end
+        const now = new Date().getTime();
+        const sortedOrders = [...orders].sort((a, b) => {
+          const aTime = a.scheduled_time
+            ? new Date(a.scheduled_time).getTime()
+            : null;
+          const bTime = b.scheduled_time
+            ? new Date(b.scheduled_time).getTime()
+            : null;
+
+          // If both have no scheduled time, sort by created_at
+          if (aTime === null && bTime === null) {
+            return (
+              new Date(a.created_at).getTime() -
+              new Date(b.created_at).getTime()
+            );
+          }
+
+          // Orders without scheduled time go last
+          if (aTime === null) return 1;
+          if (bTime === null) return -1;
+
+          // Both have scheduled times - overdue orders first, then soonest
+          const aOverdue = aTime < now;
+          const bOverdue = bTime < now;
+
+          if (aOverdue && !bOverdue) return -1;
+          if (!aOverdue && bOverdue) return 1;
+
+          // Both overdue or both not overdue - sort by time
+          return aTime - bTime;
+        });
+
+        setKdsOrders(sortedOrders);
       }
     } catch (error) {
       console.error('Error fetching KDS orders:', error);
@@ -935,6 +982,65 @@ export function POSView() {
     }
   };
 
+  const loadOrderForEdit = async (order: KDSOrder) => {
+    try {
+      // Convert KDS order items back to cart items
+      const cartItems: CartItem[] = [];
+
+      for (const item of order.items) {
+        // Find the product by name
+        const product = products.find((p) => p.name === item.product_name);
+        if (product) {
+          cartItems.push({
+            ...product,
+            quantity: item.quantity,
+            cartItemId: `edit_${Date.now()}_${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            removedIngredients: item.removed_ingredients || [],
+          });
+        }
+      }
+
+      if (cartItems.length === 0) {
+        toast.error('No se pudieron cargar los productos del pedido');
+        return;
+      }
+
+      // Set cart and editing state
+      setCart(cartItems);
+      setEditingOrderId(order.id);
+
+      // Set scheduled time if exists
+      if (order.scheduled_time) {
+        const scheduledDate = new Date(order.scheduled_time);
+        const hours = scheduledDate.getHours().toString().padStart(2, '0');
+        const minutes = scheduledDate.getMinutes().toString().padStart(2, '0');
+        setScheduledTime(`${hours}:${minutes}`);
+      } else {
+        setScheduledTime('');
+      }
+
+      // Close KDS panel
+      setShowKdsPanel(false);
+      toast.success(`Editando pedido #${order.sale_number}`);
+    } catch (error) {
+      console.error('Error loading order for edit:', error);
+      toast.error('Error al cargar el pedido');
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingOrderId(null);
+    setCart([]);
+    setScheduledTime('');
+    setCashReceived(0);
+    setChangeBreakdown(null);
+    setBillHistory([]);
+    setPaymentMethod('cash');
+    setShowPayment(false);
+  };
+
   const completeSale = async () => {
     if (cart.length === 0) return;
 
@@ -968,12 +1074,26 @@ export function POSView() {
         });
       }
 
+      // Convert scheduled time to ISO format if set
+      let scheduledTimeISO: string | undefined;
+      if (scheduledTime) {
+        const today = new Date();
+        const [hours, minutes] = scheduledTime.split(':').map(Number);
+        today.setHours(hours, minutes, 0, 0);
+        // If the time is in the past, assume it's for tomorrow
+        if (today < new Date()) {
+          today.setDate(today.getDate() + 1);
+        }
+        scheduledTimeISO = today.toISOString();
+      }
+
       const saleData = await createSale(
         items,
         paymentMethod,
         paymentMethod === 'cash' ? cashReceived : undefined,
         undefined,
-        billsChangeData
+        billsChangeData,
+        scheduledTimeISO
       );
 
       const materiaPrimaItems = cart.filter((item) => item.uses_materia_prima);
@@ -1003,7 +1123,7 @@ export function POSView() {
       }
 
       if (saleData) {
-        await sendToKDS(saleData.sale_number, items, total);
+        await sendToKDS(saleData.sale_number, items, total, scheduledTimeISO);
         // Sync theme to KDS with each sale to ensure KDS has latest theme
         await syncThemeToKDS();
       }
@@ -1012,15 +1132,24 @@ export function POSView() {
       await refreshMateriaPrima();
       // No need to call loadStocks here: it will run after products change via the effect.
 
+      // If editing, mark the old KDS order as completed
+      if (editingOrderId) {
+        await updateKdsOrderStatus(editingOrderId, 'completed');
+        setEditingOrderId(null);
+      }
+
       setCart([]);
       setCashReceived(0);
       setChangeBreakdown(null);
       setShowPayment(false);
       setPaymentMethod('cash');
       setBillHistory([]);
+      setScheduledTime('');
       setNextSaleNumber((prev) => (prev !== null ? prev + 1 : prev));
 
-      toast.success(`¡Venta completada!`);
+      toast.success(
+        editingOrderId ? '¡Pedido actualizado!' : '¡Venta completada!'
+      );
     } catch (error) {
       console.error('Error completing sale:', error);
       toast.error('Error al completar la venta');
@@ -1409,26 +1538,57 @@ export function POSView() {
               className='text-sm font-semibold'
               style={{ color: 'var(--color-text)' }}
             >
-              Venta #
-              {nextSaleNumber !== null
-                ? nextSaleNumber.toLocaleString('es-AR')
-                : '...'}
+              {editingOrderId ? (
+                <span
+                  className='flex items-center gap-2'
+                  style={{ color: 'var(--color-accent)' }}
+                >
+                  <Pencil size={14} />
+                  Editando Pedido
+                </span>
+              ) : (
+                <>
+                  Venta #
+                  {nextSaleNumber !== null
+                    ? nextSaleNumber.toLocaleString('es-AR')
+                    : '...'}
+                </>
+              )}
             </div>
-            {cart.length > 0 && (
-              <button
-                onClick={() => {
-                  setCart([]);
-                  setShowPayment(false);
-                  setCashReceived(0);
-                  setChangeBreakdown(null);
-                  setBillHistory([]);
-                  setPaymentMethod('cash');
-                }}
-                className='text-red-500 hover:text-red-700'
-              >
-                <Trash2 size={20} />
-              </button>
-            )}
+            <div className='flex items-center gap-2'>
+              {editingOrderId && (
+                <button
+                  onClick={cancelEdit}
+                  className='text-xs px-2 py-1 rounded hover:opacity-80'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Cancelar
+                </button>
+              )}
+              {cart.length > 0 && (
+                <button
+                  onClick={() => {
+                    if (editingOrderId) {
+                      cancelEdit();
+                    } else {
+                      setCart([]);
+                      setShowPayment(false);
+                      setCashReceived(0);
+                      setChangeBreakdown(null);
+                      setBillHistory([]);
+                      setPaymentMethod('cash');
+                      setScheduledTime('');
+                    }
+                  }}
+                  className='text-red-500 hover:text-red-700'
+                >
+                  <Trash2 size={20} />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className='flex-1 overflow-auto scrollbar-hide mb-6'>
@@ -1558,6 +1718,37 @@ export function POSView() {
           </div>
 
           <div className='border-t pt-4'>
+            {/* Scheduled Time Picker */}
+            <div className='mb-4'>
+              <label
+                className='flex items-center gap-2 text-sm mb-2'
+                style={{ color: 'var(--color-text)' }}
+              >
+                <Clock size={16} />
+                <span>Hora programada (opcional)</span>
+              </label>
+              <input
+                type='time'
+                value={scheduledTime}
+                onChange={(e) => setScheduledTime(e.target.value)}
+                className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                style={{
+                  backgroundColor: 'var(--color-background)',
+                  borderColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                }}
+              />
+              {scheduledTime && (
+                <button
+                  onClick={() => setScheduledTime('')}
+                  className='text-xs mt-1 hover:underline'
+                  style={{ color: 'var(--color-accent)' }}
+                >
+                  Limpiar hora
+                </button>
+              )}
+            </div>
+
             <div
               className='flex justify-between text-2xl font-bold mb-4'
               style={{ color: 'var(--color-text)' }}
@@ -1862,18 +2053,47 @@ export function POSView() {
                       style={{
                         backgroundColor: 'var(--color-background)',
                         borderColor:
-                          order.status === 'pending'
+                          order.scheduled_time &&
+                          new Date(order.scheduled_time).getTime() < Date.now()
+                            ? '#ef4444' // Red for overdue
+                            : order.status === 'pending'
                             ? 'var(--color-accent)'
                             : 'var(--color-primary)',
                       }}
                     >
                       <div className='flex items-center justify-between mb-3'>
-                        <span
-                          className='font-bold text-lg'
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          #{order.sale_number}
-                        </span>
+                        <div>
+                          <span
+                            className='font-bold text-lg'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            #{order.sale_number}
+                          </span>
+                          {order.scheduled_time && (
+                            <div
+                              className='flex items-center gap-1 text-xs mt-1 font-medium'
+                              style={{
+                                color:
+                                  new Date(order.scheduled_time).getTime() <
+                                  Date.now()
+                                    ? '#ef4444'
+                                    : 'var(--color-accent)',
+                              }}
+                            >
+                              <Clock size={12} />
+                              {new Date(
+                                order.scheduled_time
+                              ).toLocaleTimeString('es-AR', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                              {new Date(order.scheduled_time).getTime() <
+                                Date.now() && (
+                                <span className='ml-1'>(ATRASADO)</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <span
                           className='px-2 py-1 rounded-full text-xs font-semibold flex items-center gap-1'
                           style={{
@@ -1945,18 +2165,34 @@ export function POSView() {
                         </span>
 
                         {order.status === 'pending' && (
-                          <button
-                            onClick={() =>
-                              updateKdsOrderStatus(order.id, 'completed')
-                            }
-                            className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
-                            style={{
-                              backgroundColor: 'var(--color-primary)',
-                              color: 'var(--color-on-primary)',
-                            }}
-                          >
-                            Marcar Entregado
-                          </button>
+                          <div className='flex items-center gap-2'>
+                            <button
+                              onClick={() => loadOrderForEdit(order)}
+                              className='p-1.5 rounded-lg transition-all hover:opacity-80'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-accent)',
+                              }}
+                              title='Editar pedido'
+                            >
+                              <Pencil
+                                size={16}
+                                style={{ color: 'var(--color-text)' }}
+                              />
+                            </button>
+                            <button
+                              onClick={() =>
+                                updateKdsOrderStatus(order.id, 'completed')
+                              }
+                              className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                color: 'var(--color-on-primary)',
+                              }}
+                            >
+                              Marcar Entregado
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>

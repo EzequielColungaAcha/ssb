@@ -37,7 +37,8 @@ export function useSales() {
     paymentMethod: string,
     cashReceived?: number,
     billsReceived?: Record<number, number>,
-    billsChange?: Record<number, number>
+    billsChange?: Record<number, number>,
+    scheduledTime?: string
   ) => {
     try {
       await db.init();
@@ -69,6 +70,7 @@ export function useSales() {
         change_given: changeGiven,
         bills_received: billsReceived,
         bills_change: billsChange,
+        scheduled_time: scheduledTime,
         completed_at: now,
         created_at: now,
       };
@@ -131,12 +133,32 @@ export function useSales() {
     }
   };
 
+  const updateSale = async (saleId: string, updates: Partial<Sale>) => {
+    try {
+      await db.init();
+      const existing = await db.get<Sale>('sales', saleId);
+      if (!existing) throw new Error('Sale not found');
+
+      const updatedSale: Sale = {
+        ...existing,
+        ...updates,
+      };
+      await db.put('sales', updatedSale);
+      await loadSales();
+      return updatedSale;
+    } catch (error) {
+      console.error('Error updating sale:', error);
+      throw error;
+    }
+  };
+
   return {
     sales,
     loading,
     createSale,
     getSaleItems,
     getSaleById,
+    updateSale,
     refresh: loadSales,
   };
 }
