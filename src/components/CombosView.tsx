@@ -152,6 +152,7 @@ export function CombosView() {
             toast.success('Combo eliminado exitosamente');
           } catch (error) {
             toast.error('Error al eliminar el combo');
+            console.error(error);
           }
         },
       },
@@ -201,7 +202,7 @@ export function CombosView() {
     value: string | boolean | string[] | number
   ) => {
     const updated = [...slots];
-    (updated[index] as Record<string, unknown>)[field] = value;
+    (updated[index] as unknown as Record<string, unknown>)[field] = value;
 
     // If changing products, ensure default is still valid
     if (field === 'product_ids') {
@@ -936,7 +937,7 @@ export function CombosView() {
                   <div className='flex gap-2'>
                     <button
                       onClick={() => handleEdit(combo)}
-                      className='p-2 rounded-lg transition-colors'
+                      className='flex justify-center items-center p-2 rounded-lg transition-colors'
                       style={{
                         backgroundColor: 'var(--color-background-accent)',
                         color: 'var(--color-text)',
@@ -946,7 +947,7 @@ export function CombosView() {
                     </button>
                     <button
                       onClick={() => handleDelete(combo.id)}
-                      className='p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors'
+                      className='flex justify-center items-center p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors'
                     >
                       <Trash2 size={18} />
                     </button>

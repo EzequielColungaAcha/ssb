@@ -89,6 +89,31 @@ export function useCombo() {
     }
   };
 
+  // Batch update combos without reloading for each one
+  const updateCombosOrder = async (
+    orderUpdates: Array<{ id: string; display_order: number }>
+  ) => {
+    try {
+      await db.init();
+      for (const update of orderUpdates) {
+        const existing = await db.get<Combo>('combos', update.id);
+        if (existing) {
+          const updated: Combo = {
+            ...existing,
+            display_order: update.display_order,
+            updated_at: new Date().toISOString(),
+          };
+          await db.put('combos', updated);
+        }
+      }
+      // Reload only once after all updates
+      await loadCombos();
+    } catch (error) {
+      console.error('Error updating combos order:', error);
+      throw error;
+    }
+  };
+
   const calculateComboPrice = useCallback(
     async (
       combo: Combo,
@@ -190,6 +215,7 @@ export function useCombo() {
     addCombo,
     updateCombo,
     deleteCombo,
+    updateCombosOrder,
     calculateComboPrice,
     getDefaultSelections,
     getSlotProducts,

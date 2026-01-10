@@ -137,6 +137,7 @@ export interface Combo {
   discount_value?: number;
   slots: ComboSlot[];
   active: boolean;
+  display_order?: number;
   created_at: string;
   updated_at: string;
 }

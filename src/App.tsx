@@ -37,7 +37,7 @@ type View =
 
 function AppContent() {
   const [currentView, setCurrentView] = useState<View>('pos');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [currentTime, setCurrentTime] = useState('');
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const { logoConfig, loading: logoLoading } = useLogo();

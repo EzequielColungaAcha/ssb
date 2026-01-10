@@ -12,7 +12,6 @@ import {
   ChefHat,
   CheckCircle,
   Beef,
-  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -95,6 +94,7 @@ interface SortableProductItemProps {
   onAddToCart: (product: Product) => void;
   onLongPress: (product: Product) => void;
   getStock: (product: Product) => number;
+  hasRemovableIngredients: boolean;
 }
 
 function SortableProductItem({
@@ -103,6 +103,7 @@ function SortableProductItem({
   onAddToCart,
   onLongPress,
   getStock,
+  hasRemovableIngredients,
 }: SortableProductItemProps) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPress = useRef(false);
@@ -175,7 +176,7 @@ function SortableProductItem({
           color: 'var(--color-on-primary)',
         }}
       >
-        {product.uses_materia_prima && (
+        {hasRemovableIngredients && (
           <div
             className='absolute top-2 right-2 p-1 rounded-md opacity-80'
             style={{ backgroundColor: 'var(--color-on-primary)' }}
@@ -190,6 +191,81 @@ function SortableProductItem({
         </div>
         <div className='text-sm opacity-90'>
           Stock: {formatNumber(getStock(product))}
+        </div>
+      </button>
+    </div>
+  );
+}
+
+interface SortableComboItemProps {
+  combo: Combo;
+  isLocked: boolean;
+  onOpenComboModal: (combo: Combo) => void;
+}
+
+function SortableComboItem({
+  combo,
+  isLocked,
+  onOpenComboModal,
+}: SortableComboItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: `combo-${combo.id}`,
+    disabled: isLocked,
+    data: { type: 'combo' },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    touchAction: isLocked ? 'auto' : 'none',
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className='relative'
+      {...(isLocked ? {} : { ...attributes, ...listeners })}
+    >
+      <button
+        onClick={isLocked ? () => onOpenComboModal(combo) : undefined}
+        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 text-left relative ${
+          isLocked
+            ? 'hover:shadow-xl hover:scale-105 select-none'
+            : 'cursor-move'
+        }`}
+        style={{
+          backgroundColor: 'var(--color-accent)',
+          color: 'var(--color-on-accent)',
+        }}
+      >
+        <div className='text-lg font-bold mb-2'>{combo.name}</div>
+        <div className='text-2xl font-bold mb-1'>
+          {combo.price_type === 'fixed'
+            ? formatPrice(combo.fixed_price || 0)
+            : combo.discount_type === 'percentage'
+            ? `-${combo.discount_value}%`
+            : `-${formatPrice(combo.discount_value || 0)}`}
+        </div>
+        <div className='text-sm opacity-90'>
+          {combo.slots.length} producto
+          {combo.slots.length !== 1 ? 's' : ''}
+        </div>
+        <div
+          className='absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-semibold'
+          style={{
+            backgroundColor: 'rgba(255,255,255,0.2)',
+          }}
+        >
+          COMBO
         </div>
       </button>
     </div>
@@ -258,8 +334,13 @@ export function POSView() {
     getProductMateriaPrima,
     materiaPrima,
   } = useMateriaPrima();
-  const { combos, calculateComboPrice, getDefaultSelections, getSlotProducts } =
-    useCombo();
+  const {
+    combos,
+    calculateComboPrice,
+    getDefaultSelections,
+    getSlotProducts,
+    updateCombosOrder,
+  } = useCombo();
   const { syncThemeToKDS } = useTheme();
 
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -303,6 +384,15 @@ export function POSView() {
   const [comboPrice, setComboPrice] = useState(0);
 
   const activeCombos = combos.filter((c) => c.active);
+
+  // State for sorted combos (for drag and drop)
+  const [sortedCombos, setSortedCombos] = useState<Combo[]>([]);
+
+  // Track which products have removable ingredients
+  const [
+    productsWithRemovableIngredients,
+    setProductsWithRemovableIngredients,
+  ] = useState<Set<string>>(new Set());
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -368,9 +458,15 @@ export function POSView() {
     (p) => p.active && getProductStock(p) > 0
   );
 
-  const allCategories = Array.from(
+  const productCategories = Array.from(
     new Set(activeProducts.map((p) => p.category))
   );
+
+  // Include "combos" as a category if there are active combos
+  const allCategories =
+    activeCombos.length > 0
+      ? [...productCategories, 'combos']
+      : productCategories;
 
   const categories =
     categoryOrder.length > 0
@@ -1024,17 +1120,48 @@ export function POSView() {
       const newProducts = arrayMove(sortedProducts, oldIndex, newIndex);
       setSortedProducts(newProducts);
       await saveProductOrder(newProducts);
+    } else if (activeData?.type === 'combo' && overData?.type === 'combo') {
+      const activeComboId = (active.id as string).replace('combo-', '');
+      const overComboId = (over.id as string).replace('combo-', '');
+
+      const oldIndex = sortedCombos.findIndex((c) => c.id === activeComboId);
+      const newIndex = sortedCombos.findIndex((c) => c.id === overComboId);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        const newSortedCombos = arrayMove(sortedCombos, oldIndex, newIndex);
+        setSortedCombos(newSortedCombos);
+
+        // Save combo order to database (batch update)
+        try {
+          const orderUpdates = newSortedCombos.map((combo, index) => ({
+            id: combo.id,
+            display_order: index,
+          }));
+          await updateCombosOrder(orderUpdates);
+        } catch (error) {
+          console.error('Error saving combo order:', error);
+        }
+      }
     }
   };
 
   const activeProduct =
-    activeId && !activeId.toString().startsWith('category-')
+    activeId &&
+    !activeId.toString().startsWith('category-') &&
+    !activeId.toString().startsWith('combo-')
       ? sortedProducts.find((p) => p.id === activeId)
       : null;
 
   const activeCategory =
     activeId && activeId.toString().startsWith('category-')
       ? activeId.toString().replace('category-', '')
+      : null;
+
+  const activeCombo =
+    activeId && activeId.toString().startsWith('combo-')
+      ? sortedCombos.find(
+          (c) => c.id === activeId.toString().replace('combo-', '')
+        )
       : null;
 
   const loadNextSaleNumber = useCallback(async () => {
@@ -1113,6 +1240,39 @@ export function POSView() {
     setSortedProducts(sorted);
   }, [products]);
 
+  // Sync sorted combos with active combos (sorted by display_order)
+  useEffect(() => {
+    const active = combos.filter((c) => c.active);
+    const sorted = [...active].sort((a, b) => {
+      const orderA = a.display_order ?? 999999;
+      const orderB = b.display_order ?? 999999;
+      return orderA - orderB;
+    });
+    setSortedCombos(sorted);
+  }, [combos]);
+
+  // Load products with removable ingredients
+  useEffect(() => {
+    const loadRemovableIngredients = async () => {
+      const productsWithRemovable = new Set<string>();
+
+      for (const product of products) {
+        if (product.uses_materia_prima) {
+          const productMPs = await getProductMateriaPrima(product.id);
+          const hasRemovable = productMPs.some((mp) => mp.removable === true);
+          if (hasRemovable) {
+            productsWithRemovable.add(product.id);
+          }
+        }
+      }
+
+      setProductsWithRemovableIngredients(productsWithRemovable);
+    };
+
+    loadRemovableIngredients();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
   // KDS polling when panel is open
   useEffect(() => {
     if (showKdsPanel && kdsEnabled && kdsUrl) {
@@ -1173,6 +1333,35 @@ export function POSView() {
             disabled={isLayoutLocked}
           >
             {categories.map((category) => {
+              // Handle combos category specially
+              if (category === 'combos') {
+                const comboIds = sortedCombos.map((c) => `combo-${c.id}`);
+                return (
+                  <SortableCategory
+                    key='combos'
+                    category='combos'
+                    isLocked={isLayoutLocked}
+                  >
+                    <SortableContext
+                      items={comboIds}
+                      strategy={rectSortingStrategy}
+                      disabled={isLayoutLocked}
+                    >
+                      <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                        {sortedCombos.map((combo) => (
+                          <SortableComboItem
+                            key={combo.id}
+                            combo={combo}
+                            isLocked={isLayoutLocked}
+                            onOpenComboModal={openComboModal}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </SortableCategory>
+                );
+              }
+
               const categoryProducts = activeProducts.filter(
                 (p) => p.category === category
               );
@@ -1198,6 +1387,9 @@ export function POSView() {
                           onAddToCart={(p) => addToCart(p)}
                           onLongPress={handleProductLongPress}
                           getStock={getProductStock}
+                          hasRemovableIngredients={productsWithRemovableIngredients.has(
+                            product.id
+                          )}
                         />
                       ))}
                     </div>
@@ -1206,53 +1398,6 @@ export function POSView() {
               );
             })}
           </SortableContext>
-
-          {/* Combos Section */}
-          {activeCombos.length > 0 && (
-            <div className='mb-8'>
-              <h2
-                className='text-xl font-semibold mb-4 flex items-center gap-2'
-                style={{ color: 'var(--color-text)' }}
-              >
-                <Layers size={20} style={{ color: 'var(--color-primary)' }} />
-                Combos
-              </h2>
-              <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
-                {activeCombos.map((combo) => (
-                  <button
-                    key={combo.id}
-                    onClick={() => openComboModal(combo)}
-                    className='p-6 rounded-lg transition-transform active:scale-95 text-left relative'
-                    style={{
-                      backgroundColor: 'var(--color-accent)',
-                      color: 'var(--color-on-accent)',
-                    }}
-                  >
-                    <div className='text-lg font-bold mb-2'>{combo.name}</div>
-                    <div className='text-2xl font-bold mb-1'>
-                      {combo.price_type === 'fixed'
-                        ? formatPrice(combo.fixed_price || 0)
-                        : combo.discount_type === 'percentage'
-                        ? `-${combo.discount_value}%`
-                        : `-${formatPrice(combo.discount_value || 0)}`}
-                    </div>
-                    <div className='text-sm opacity-90'>
-                      {combo.slots.length} producto
-                      {combo.slots.length !== 1 ? 's' : ''}
-                    </div>
-                    <div
-                      className='absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-semibold'
-                      style={{
-                        backgroundColor: 'rgba(255,255,255,0.2)',
-                      }}
-                    >
-                      COMBO
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         <div
@@ -2081,6 +2226,26 @@ export function POSView() {
               <div className='text-sm opacity-90'>
                 Stock: {formatNumber(getProductStock(activeProduct))}
               </div>
+            </button>
+          </div>
+        ) : activeCombo ? (
+          <div className='opacity-80 rotate-3 scale-105 shadow-2xl'>
+            <button
+              className='w-full p-6 rounded-lg'
+              style={{
+                backgroundColor: 'var(--color-accent)',
+                color: 'var(--color-on-accent)',
+              }}
+            >
+              <div className='text-lg font-bold mb-2'>{activeCombo.name}</div>
+              <div className='text-2xl font-bold mb-1'>
+                {activeCombo.price_type === 'fixed'
+                  ? formatPrice(activeCombo.fixed_price || 0)
+                  : activeCombo.discount_type === 'percentage'
+                  ? `-${activeCombo.discount_value}%`
+                  : `-${formatPrice(activeCombo.discount_value || 0)}`}
+              </div>
+              <div className='text-sm opacity-90'>COMBO</div>
             </button>
           </div>
         ) : activeCategory ? (
