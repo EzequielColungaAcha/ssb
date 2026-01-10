@@ -1,12 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Package } from 'lucide-react';
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Save,
+  X,
+  Package,
+  Beef,
+  Download,
+  Layers,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { Product } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { CombosView } from './CombosView';
 
 export function ProductsView() {
+  const [activeTab, setActiveTab] = useState<'products' | 'combos'>('products');
   const { products, addProduct, updateProduct, deleteProduct, loading } =
     useProducts();
   const {
@@ -23,6 +35,7 @@ export function ProductsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
+    description: '',
     price: '',
     production_cost: '',
     stock: '',
@@ -31,7 +44,7 @@ export function ProductsView() {
     uses_materia_prima: false,
   });
   const [materiaPrimaItems, setMateriaPrimaItems] = useState<
-    Array<{ materia_prima_id: string; quantity: string }>
+    Array<{ materia_prima_id: string; quantity: string; removable: boolean }>
   >([]);
 
   const categories = [
@@ -84,6 +97,7 @@ export function ProductsView() {
       if (editingId) {
         await updateProduct(editingId, {
           name: formData.name,
+          description: formData.description,
           price: parseFloat(formData.price),
           production_cost: usesMateriaPrima ? 0 : productionCost,
           stock: usesMateriaPrima ? 0 : parseInt(formData.stock),
@@ -94,6 +108,7 @@ export function ProductsView() {
       } else {
         const newProduct = await addProduct({
           name: formData.name,
+          description: formData.description,
           price: parseFloat(formData.price),
           production_cost: usesMateriaPrima ? 0 : productionCost,
           stock: usesMateriaPrima ? 0 : parseInt(formData.stock || '0'),
@@ -108,6 +123,7 @@ export function ProductsView() {
         const items = materiaPrimaItems.map((item) => ({
           materia_prima_id: item.materia_prima_id,
           quantity: parseFloat(item.quantity),
+          removable: item.removable,
         }));
         await setProductMateriaPrima(productId, items);
 
@@ -117,6 +133,7 @@ export function ProductsView() {
 
       setFormData({
         name: '',
+        description: '',
         price: '',
         production_cost: '',
         stock: '',
@@ -141,6 +158,7 @@ export function ProductsView() {
   const handleEdit = async (product: Product) => {
     setFormData({
       name: product.name,
+      description: product.description || '',
       price: product.price.toString(),
       production_cost: product.production_cost.toString(),
       stock: product.stock.toString(),
@@ -156,6 +174,7 @@ export function ProductsView() {
         items.map((item) => ({
           materia_prima_id: item.materia_prima_id,
           quantity: item.quantity.toString(),
+          removable: item.removable ?? true,
         }))
       );
     } else {
@@ -190,6 +209,7 @@ export function ProductsView() {
   const handleCancel = () => {
     setFormData({
       name: '',
+      description: '',
       price: '',
       production_cost: '',
       stock: '',
@@ -202,10 +222,62 @@ export function ProductsView() {
     setEditingId(null);
   };
 
+  const exportProductsForWeb = async () => {
+    try {
+      const exportData = await Promise.all(
+        products
+          .filter((p) => p.active)
+          .map(async (p) => {
+            let ingredients: Array<{ id: string; name: string }> = [];
+
+            if (p.uses_materia_prima) {
+              const productIngredients = await getProductMateriaPrima(p.id);
+              ingredients = productIngredients
+                .filter((i) => i.removable)
+                .map((i) => {
+                  const mp = materiaPrima.find(
+                    (m) => m.id === i.materia_prima_id
+                  );
+                  return {
+                    id: i.materia_prima_id,
+                    name: mp?.name || 'Desconocido',
+                  };
+                });
+            }
+
+            return {
+              id: p.id,
+              name: p.name,
+              description: p.description || '',
+              price: p.price,
+              category: p.category,
+              ingredients,
+            };
+          })
+      );
+
+      const jsonString = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'products.json';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success('Productos exportados exitosamente');
+    } catch (error) {
+      console.error('Error exporting products:', error);
+      toast.error('Error al exportar productos');
+    }
+  };
+
   const addMateriaPrimaItem = () => {
     setMateriaPrimaItems([
       ...materiaPrimaItems,
-      { materia_prima_id: '', quantity: '' },
+      { materia_prima_id: '', quantity: '', removable: true },
     ]);
   };
 
@@ -215,11 +287,15 @@ export function ProductsView() {
 
   const updateMateriaPrimaItem = (
     index: number,
-    field: 'materia_prima_id' | 'quantity',
-    value: string
+    field: 'materia_prima_id' | 'quantity' | 'removable',
+    value: string | boolean
   ) => {
     const updated = [...materiaPrimaItems];
-    updated[index][field] = value;
+    if (field === 'removable') {
+      updated[index][field] = value as boolean;
+    } else {
+      updated[index][field] = value as string;
+    }
     setMateriaPrimaItems(updated);
   };
 
@@ -227,8 +303,58 @@ export function ProductsView() {
     return <div className='p-6 dark:text-white'>Cargando...</div>;
   }
 
+  // Tab selector
+  const TabSelector = () => (
+    <div
+      className='flex gap-1 p-1 rounded-lg mb-6'
+      style={{ backgroundColor: 'var(--color-background-accent)' }}
+    >
+      <button
+        onClick={() => setActiveTab('products')}
+        className='flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors'
+        style={{
+          backgroundColor:
+            activeTab === 'products' ? 'var(--color-primary)' : 'transparent',
+          color:
+            activeTab === 'products'
+              ? 'var(--color-on-primary)'
+              : 'var(--color-text)',
+        }}
+      >
+        <Package size={18} />
+        Productos
+      </button>
+      <button
+        onClick={() => setActiveTab('combos')}
+        className='flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors'
+        style={{
+          backgroundColor:
+            activeTab === 'combos' ? 'var(--color-primary)' : 'transparent',
+          color:
+            activeTab === 'combos'
+              ? 'var(--color-on-primary)'
+              : 'var(--color-text)',
+        }}
+      >
+        <Layers size={18} />
+        Combos
+      </button>
+    </div>
+  );
+
+  // Show CombosView if combos tab is active
+  if (activeTab === 'combos') {
+    return (
+      <div className='p-6'>
+        <TabSelector />
+        <CombosView />
+      </div>
+    );
+  }
+
   return (
     <div className='p-6'>
+      <TabSelector />
       <div className='flex justify-between items-center mb-6'>
         <div className='mb-6'>
           <h1
@@ -243,188 +369,60 @@ export function ProductsView() {
           </p>
         </div>
         {!showForm && (
-          <button
-            onClick={() => setShowForm(true)}
-            className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
-            style={{
-              backgroundColor: 'var(--color-primary)',
-              color: 'var(--color-on-primary)',
-            }}
-          >
-            <Plus size={20} />
-            Añadir Producto
-          </button>
+          <div className='flex gap-2'>
+            <button
+              onClick={exportProductsForWeb}
+              className='flex items-center gap-2 px-4 py-2 rounded-lg font-semibold'
+              style={{
+                backgroundColor: 'var(--color-background-accent)',
+                color: 'var(--color-text)',
+              }}
+              title='Exportar productos para la web de clientes'
+            >
+              <Download size={20} />
+              Exportar Web
+            </button>
+            <button
+              onClick={() => setShowForm(true)}
+              className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
+              style={{
+                backgroundColor: 'var(--color-primary)',
+                color: 'var(--color-on-primary)',
+              }}
+            >
+              <Plus size={20} />
+              Añadir Producto
+            </button>
+          </div>
         )}
       </div>
 
       {showForm && (
-        <div
-          className='rounded-lg shadow-md p-6 mb-6'
-          style={{ backgroundColor: 'var(--color-background-secondary)' }}
-        >
-          <h2
-            className='text-xl font-bold mb-4'
-            style={{ color: 'var(--color-text)' }}
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-2xl max-h-[90vh] overflow-auto rounded-xl shadow-2xl p-6 mx-4'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
           >
-            {editingId ? 'Editar Producto' : 'Nuevo Producto'}
-          </h2>
-          <form onSubmit={handleSubmit} className='space-y-4'>
-            <div>
-              <label
-                className='block text-sm font-medium mb-1'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Nombre
-              </label>
-              <input
-                type='text'
-                required
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                className='w-full px-3 py-2 border rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                  borderColor: 'var(--color-text)',
-                }}
-              />
-            </div>
-
-            <div className='flex items-center gap-2'>
-              <input
-                type='checkbox'
-                id='uses_materia_prima'
-                checked={formData.uses_materia_prima}
-                onChange={(e) => {
-                  setFormData({
-                    ...formData,
-                    uses_materia_prima: e.target.checked,
-                  });
-                  if (!e.target.checked) {
-                    setMateriaPrimaItems([]);
-                  }
-                }}
-                className='w-4 h-4'
-              />
-              <label
-                htmlFor='uses_materia_prima'
-                className='text-sm font-medium'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Usa Materia Prima (el costo se calculará automáticamente)
-              </label>
-            </div>
-
-            {formData.uses_materia_prima && (
-              <div
-                className='border rounded-lg p-4'
-                style={{ borderColor: 'var(--color-text)' }}
-              >
-                <div className='flex justify-between items-center mb-3'>
-                  <h3
-                    className='font-semibold'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    Ingredientes de Materia Prima
-                  </h3>
-                  <button
-                    type='button'
-                    onClick={addMateriaPrimaItem}
-                    className='flex items-center gap-1 px-3 py-1 rounded text-sm text-white'
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus size={16} />
-                    Agregar
-                  </button>
-                </div>
-
-                {materiaPrimaItems.length === 0 ? (
-                  <p
-                    className='text-sm opacity-60'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    No hay ingredientes. Hacé clic en "Agregar" para añadir.
-                  </p>
-                ) : (
-                  <div className='space-y-2'>
-                    {materiaPrimaItems.map((item, index) => (
-                      <div key={index} className='flex gap-2'>
-                        <select
-                          value={item.materia_prima_id}
-                          onChange={(e) =>
-                            updateMateriaPrimaItem(
-                              index,
-                              'materia_prima_id',
-                              e.target.value
-                            )
-                          }
-                          required
-                          className='flex-1 px-3 py-2 border rounded-lg'
-                          style={{
-                            backgroundColor: 'var(--color-background-accent)',
-                            color: 'var(--color-text)',
-                            borderColor: 'var(--color-text)',
-                          }}
-                        >
-                          <option value=''>Seleccionar ingrediente</option>
-                          {materiaPrima.map((mp) => (
-                            <option key={mp.id} value={mp.id}>
-                              {mp.name} (
-                              {mp.unit === 'units' ? 'unidades' : 'kg'})
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type='number'
-                          step='0.001'
-                          required
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateMateriaPrimaItem(
-                              index,
-                              'quantity',
-                              e.target.value
-                            )
-                          }
-                          placeholder='Cantidad'
-                          className='w-32 px-3 py-2 border rounded-lg'
-                          style={{
-                            backgroundColor: 'var(--color-background-accent)',
-                            color: 'var(--color-text)',
-                            borderColor: 'var(--color-text)',
-                          }}
-                        />
-                        <button
-                          type='button'
-                          onClick={() => removeMateriaPrimaItem(index)}
-                          className='px-3 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600'
-                        >
-                          <X size={18} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className='grid grid-cols-2 gap-4'>
+            <h2
+              className='text-xl font-bold mb-4'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {editingId ? 'Editar Producto' : 'Nuevo Producto'}
+            </h2>
+            <form onSubmit={handleSubmit} className='space-y-4'>
               <div>
                 <label
                   className='block text-sm font-medium mb-1'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  Precio de Venta ($)
+                  Nombre
                 </label>
                 <input
-                  type='number'
-                  step='0.01'
+                  type='text'
                   required
-                  value={formData.price}
+                  value={formData.name}
                   onChange={(e) =>
-                    setFormData({ ...formData, price: e.target.value })
+                    setFormData({ ...formData, name: e.target.value })
                   }
                   className='w-full px-3 py-2 border rounded-lg'
                   style={{
@@ -435,24 +433,239 @@ export function ProductsView() {
                 />
               </div>
 
+              <div>
+                <label
+                  className='block text-sm font-medium mb-1'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Descripción (opcional)
+                </label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
+                  rows={2}
+                  placeholder='Descripción del producto para la tienda web...'
+                  className='w-full px-3 py-2 border rounded-lg resize-none'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                    borderColor: 'var(--color-text)',
+                  }}
+                />
+              </div>
+
+              <div className='flex items-center gap-2'>
+                <input
+                  type='checkbox'
+                  id='uses_materia_prima'
+                  checked={formData.uses_materia_prima}
+                  onChange={(e) => {
+                    setFormData({
+                      ...formData,
+                      uses_materia_prima: e.target.checked,
+                    });
+                    if (!e.target.checked) {
+                      setMateriaPrimaItems([]);
+                    }
+                  }}
+                  className='w-4 h-4'
+                />
+                <label
+                  htmlFor='uses_materia_prima'
+                  className='text-sm font-medium'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Usa Materia Prima (el costo se calculará automáticamente)
+                </label>
+              </div>
+
+              {formData.uses_materia_prima && (
+                <div
+                  className='border rounded-lg p-4'
+                  style={{ borderColor: 'var(--color-text)' }}
+                >
+                  <div className='flex justify-between items-center mb-3'>
+                    <h3
+                      className='font-semibold'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Ingredientes de Materia Prima
+                    </h3>
+                    <button
+                      type='button'
+                      onClick={addMateriaPrimaItem}
+                      className='flex items-center gap-1 px-3 py-1 rounded text-sm text-white'
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus size={16} />
+                      Agregar
+                    </button>
+                  </div>
+
+                  {materiaPrimaItems.length === 0 ? (
+                    <p
+                      className='text-sm opacity-60'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      No hay ingredientes. Hacé clic en "Agregar" para añadir.
+                    </p>
+                  ) : (
+                    <div className='space-y-2'>
+                      {materiaPrimaItems.map((item, index) => (
+                        <div key={index} className='flex gap-2'>
+                          <select
+                            value={item.materia_prima_id}
+                            onChange={(e) =>
+                              updateMateriaPrimaItem(
+                                index,
+                                'materia_prima_id',
+                                e.target.value
+                              )
+                            }
+                            required
+                            className='flex-1 px-3 py-2 border rounded-lg'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-text)',
+                            }}
+                          >
+                            <option value=''>Seleccionar ingrediente</option>
+                            {materiaPrima.map((mp) => (
+                              <option key={mp.id} value={mp.id}>
+                                {mp.name} (
+                                {mp.unit === 'units' ? 'unidades' : 'kg'})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type='number'
+                            step='0.001'
+                            required
+                            value={item.quantity}
+                            onChange={(e) =>
+                              updateMateriaPrimaItem(
+                                index,
+                                'quantity',
+                                e.target.value
+                              )
+                            }
+                            placeholder='Cantidad'
+                            className='w-32 px-3 py-2 border rounded-lg'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-text)',
+                            }}
+                          />
+                          <label
+                            className='flex items-center gap-1 px-2 cursor-pointer'
+                            title='Puede quitarse en POS'
+                          >
+                            <input
+                              type='checkbox'
+                              checked={item.removable}
+                              onChange={(e) =>
+                                updateMateriaPrimaItem(
+                                  index,
+                                  'removable',
+                                  e.target.checked
+                                )
+                              }
+                              className='w-4 h-4'
+                            />
+                            <span
+                              className='text-xs whitespace-nowrap'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              Removible
+                            </span>
+                          </label>
+                          <button
+                            type='button'
+                            onClick={() => removeMateriaPrimaItem(index)}
+                            className='px-3 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className='grid grid-cols-2 gap-4'>
+                <div>
+                  <label
+                    className='block text-sm font-medium mb-1'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Precio de Venta ($)
+                  </label>
+                  <input
+                    type='number'
+                    step='0.01'
+                    required
+                    value={formData.price}
+                    onChange={(e) =>
+                      setFormData({ ...formData, price: e.target.value })
+                    }
+                    className='w-full px-3 py-2 border rounded-lg'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                      borderColor: 'var(--color-text)',
+                    }}
+                  />
+                </div>
+
+                {!formData.uses_materia_prima && (
+                  <div>
+                    <label
+                      className='block text-sm font-medium mb-1'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Costo ($)
+                    </label>
+                    <input
+                      type='number'
+                      step='0.01'
+                      required
+                      value={formData.production_cost}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          production_cost: e.target.value,
+                        })
+                      }
+                      className='w-full px-3 py-2 border rounded-lg'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-text)',
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
               {!formData.uses_materia_prima && (
                 <div>
                   <label
                     className='block text-sm font-medium mb-1'
                     style={{ color: 'var(--color-text)' }}
                   >
-                    Costo ($)
+                    Stock
                   </label>
                   <input
                     type='number'
-                    step='0.01'
                     required
-                    value={formData.production_cost}
+                    value={formData.stock}
                     onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        production_cost: e.target.value,
-                      })
+                      setFormData({ ...formData, stock: e.target.value })
                     }
                     className='w-full px-3 py-2 border rounded-lg'
                     style={{
@@ -463,22 +676,35 @@ export function ProductsView() {
                   />
                 </div>
               )}
-            </div>
+              {formData.uses_materia_prima && (
+                <div
+                  className='p-3 rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    borderColor: 'var(--color-text)',
+                  }}
+                >
+                  <p
+                    className='text-sm opacity-80'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    El stock de este producto se calcula automáticamente según
+                    la disponibilidad de materia prima.
+                  </p>
+                </div>
+              )}
 
-            {!formData.uses_materia_prima && (
               <div>
                 <label
                   className='block text-sm font-medium mb-1'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  Stock
+                  Categoría
                 </label>
-                <input
-                  type='number'
-                  required
-                  value={formData.stock}
+                <select
+                  value={formData.category}
                   onChange={(e) =>
-                    setFormData({ ...formData, stock: e.target.value })
+                    setFormData({ ...formData, category: e.target.value })
                   }
                   className='w-full px-3 py-2 border rounded-lg'
                   style={{
@@ -486,95 +712,57 @@ export function ProductsView() {
                     color: 'var(--color-text)',
                     borderColor: 'var(--color-text)',
                   }}
-                />
+                >
+                  {categories.map((cat) => (
+                    <option key={cat.value} value={cat.value}>
+                      {cat.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-            )}
-            {formData.uses_materia_prima && (
-              <div
-                className='p-3 rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  borderColor: 'var(--color-text)',
-                }}
-              >
-                <p
-                  className='text-sm opacity-80'
+
+              <div className='flex items-center gap-2'>
+                <input
+                  type='checkbox'
+                  id='active'
+                  checked={formData.active}
+                  onChange={(e) =>
+                    setFormData({ ...formData, active: e.target.checked })
+                  }
+                  className='w-4 h-4'
+                />
+                <label
+                  htmlFor='active'
+                  className='text-sm font-medium'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  El stock de este producto se calcula automáticamente según la
-                  disponibilidad de materia prima.
-                </p>
+                  Activo
+                </label>
               </div>
-            )}
 
-            <div>
-              <label
-                className='block text-sm font-medium mb-1'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Categoría
-              </label>
-              <select
-                value={formData.category}
-                onChange={(e) =>
-                  setFormData({ ...formData, category: e.target.value })
-                }
-                className='w-full px-3 py-2 border rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                  borderColor: 'var(--color-text)',
-                }}
-              >
-                {categories.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className='flex items-center gap-2'>
-              <input
-                type='checkbox'
-                id='active'
-                checked={formData.active}
-                onChange={(e) =>
-                  setFormData({ ...formData, active: e.target.checked })
-                }
-                className='w-4 h-4'
-              />
-              <label
-                htmlFor='active'
-                className='text-sm font-medium'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Activo
-              </label>
-            </div>
-
-            <div className='flex gap-2'>
-              <button
-                type='submit'
-                className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
-                style={{
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'var(--color-on-primary)',
-                }}
-              >
-                <Save size={18} />
-                {editingId ? 'Actualizar' : 'Guardar'}
-              </button>
-              <button
-                type='button'
-                onClick={handleCancel}
-                className='flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold'
-              >
-                <X size={18} />
-                Cancelar
-              </button>
-            </div>
-          </form>
+              <div className='flex gap-2'>
+                <button
+                  type='submit'
+                  className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
+                  style={{
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'var(--color-on-primary)',
+                  }}
+                >
+                  <Save size={18} />
+                  {editingId ? 'Actualizar' : 'Guardar'}
+                </button>
+                <button
+                  type='button'
+                  onClick={handleCancel}
+                  className='flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold'
+                >
+                  <X size={18} />
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -621,7 +809,7 @@ export function ProductsView() {
                   }}
                   title='Usa Materia Prima'
                 >
-                  <Package
+                  <Beef
                     size={16}
                     style={{ color: 'var(--color-on-primary)' }}
                   />

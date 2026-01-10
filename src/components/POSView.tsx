@@ -11,6 +11,8 @@ import {
   Eye,
   ChefHat,
   CheckCircle,
+  Beef,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -33,22 +35,31 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Product, db, AppSettings, Sale } from '../lib/indexeddb';
+import { Product, db, AppSettings, Sale, Combo } from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
+import { useCombo, ComboSelection } from '../hooks/useCombo';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatPrice, formatNumber } from '../lib/utils';
 
 interface CartItem extends Product {
   quantity: number;
+  cartItemId: string; // unique per cart entry (allows same product with different mods)
+  removedIngredients: string[]; // materia prima names removed
+  // Combo-specific fields
+  isCombo?: boolean;
+  comboId?: string;
+  comboName?: string;
+  comboSelections?: ComboSelection[];
 }
 
 interface KDSOrderItem {
   product_name: string;
   quantity: number;
   product_price: number;
+  removed_ingredients?: string[];
 }
 
 interface KDSOrder {
@@ -67,6 +78,13 @@ interface SaleItem {
   product_price: number;
   production_cost: number;
   quantity: number;
+  removedIngredients?: string[];
+}
+
+interface IngredientInfo {
+  id: string;
+  name: string;
+  removed: boolean;
 }
 
 const BILLS = [10, 20, 50, 100, 200, 500, 1000, 2000, 10000, 20000];
@@ -75,6 +93,7 @@ interface SortableProductItemProps {
   product: Product;
   isLocked: boolean;
   onAddToCart: (product: Product) => void;
+  onLongPress: (product: Product) => void;
   getStock: (product: Product) => number;
 }
 
@@ -82,8 +101,12 @@ function SortableProductItem({
   product,
   isLocked,
   onAddToCart,
+  onLongPress,
   getStock,
 }: SortableProductItemProps) {
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPress = useRef(false);
+
   const {
     attributes,
     listeners,
@@ -104,6 +127,32 @@ function SortableProductItem({
     touchAction: isLocked ? 'auto' : 'none',
   };
 
+  const handlePointerDown = () => {
+    isLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true;
+      onLongPress(product);
+    }, 500);
+  };
+
+  const handlePointerUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (!isLongPress.current) {
+      onAddToCart(product);
+    }
+    isLongPress.current = false;
+  };
+
+  const handlePointerLeave = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
   return (
     <div
       ref={setNodeRef}
@@ -112,15 +161,29 @@ function SortableProductItem({
       {...(isLocked ? {} : { ...attributes, ...listeners })}
     >
       <button
-        onClick={() => onAddToCart(product)}
-        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 ${
-          isLocked ? 'hover:shadow-xl hover:scale-105' : 'cursor-move'
+        onPointerDown={isLocked ? handlePointerDown : undefined}
+        onPointerUp={isLocked ? handlePointerUp : undefined}
+        onPointerLeave={isLocked ? handlePointerLeave : undefined}
+        onClick={isLocked ? undefined : () => onAddToCart(product)}
+        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 relative ${
+          isLocked
+            ? 'hover:shadow-xl hover:scale-105 select-none'
+            : 'cursor-move'
         }`}
         style={{
           backgroundColor: 'var(--color-primary)',
           color: 'var(--color-on-primary)',
         }}
       >
+        {product.uses_materia_prima && (
+          <div
+            className='absolute top-2 right-2 p-1 rounded-md opacity-80'
+            style={{ backgroundColor: 'var(--color-on-primary)' }}
+            title='Mantené presionado para personalizar'
+          >
+            <Beef size={14} style={{ color: 'var(--color-primary)' }} />
+          </div>
+        )}
         <div className='text-lg font-bold mb-2'>{product.name}</div>
         <div className='text-2xl font-bold mb-1'>
           {formatPrice(product.price)}
@@ -192,7 +255,11 @@ export function POSView() {
     deductMateriaPrimaStock,
     calculateAvailableStock,
     refresh: refreshMateriaPrima,
+    getProductMateriaPrima,
+    materiaPrima,
   } = useMateriaPrima();
+  const { combos, calculateComboPrice, getDefaultSelections, getSlotProducts } =
+    useCombo();
   const { syncThemeToKDS } = useTheme();
 
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -218,6 +285,24 @@ export function POSView() {
   const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
   const kdsPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const finishedOrdersRef = useRef<Set<string>>(new Set());
+
+  // Ingredient customization modal state
+  const [showIngredientModal, setShowIngredientModal] = useState(false);
+  const [customizingProduct, setCustomizingProduct] = useState<Product | null>(
+    null
+  );
+  const [ingredientsList, setIngredientsList] = useState<IngredientInfo[]>([]);
+
+  // Combo customization modal state
+  const [showComboModal, setShowComboModal] = useState(false);
+  const [customizingCombo, setCustomizingCombo] = useState<Combo | null>(null);
+  const [comboSelections, setComboSelections] = useState<ComboSelection[]>([]);
+  const [comboSlotProducts, setComboSlotProducts] = useState<
+    Record<string, Product[]>
+  >({});
+  const [comboPrice, setComboPrice] = useState(0);
+
+  const activeCombos = combos.filter((c) => c.active);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -297,8 +382,17 @@ export function POSView() {
         ]
       : allCategories;
 
-  const addToCart = async (product: Product) => {
-    const existing = cart.find((item) => item.id === product.id);
+  const addToCart = async (
+    product: Product,
+    removedIngredients: string[] = []
+  ) => {
+    const removedKey = removedIngredients.sort().join(',');
+    // Find existing item with same product AND same removed ingredients
+    const existing = cart.find(
+      (item) =>
+        item.id === product.id &&
+        item.removedIngredients.sort().join(',') === removedKey
+    );
     const newQuantity = existing ? existing.quantity + 1 : 1;
     const availableStock = getProductStock(product);
 
@@ -316,21 +410,222 @@ export function POSView() {
     }
 
     setCart((prevCart) => {
-      const prevExisting = prevCart.find((item) => item.id === product.id);
+      const prevExisting = prevCart.find(
+        (item) =>
+          item.id === product.id &&
+          item.removedIngredients.sort().join(',') === removedKey
+      );
       if (prevExisting) {
         return prevCart.map((item) =>
-          item.id === product.id
+          item.cartItemId === prevExisting.cartItemId
             ? { ...item, quantity: item.quantity + 1 }
             : item
         );
       }
-      return [...prevCart, { ...product, quantity: 1 }];
+      return [
+        ...prevCart,
+        {
+          ...product,
+          quantity: 1,
+          cartItemId: crypto.randomUUID(),
+          removedIngredients,
+        },
+      ];
     });
   };
 
-  const removeFromCart = (productId: string) => {
+  // Handle long-press to open ingredient customization modal
+  const handleProductLongPress = async (product: Product) => {
+    if (!product.uses_materia_prima) {
+      // If product doesn't use materia prima, just add to cart
+      addToCart(product);
+      return;
+    }
+
+    // Fetch product's materia prima
+    const productMPs = await getProductMateriaPrima(product.id);
+
+    if (productMPs.length === 0) {
+      // No ingredients to customize, just add to cart
+      addToCart(product);
+      return;
+    }
+
+    // Filter only removable ingredients
+    const removableMPs = productMPs.filter((pmp) => pmp.removable === true);
+
+    if (removableMPs.length === 0) {
+      // No removable ingredients, just add to cart
+      addToCart(product);
+      return;
+    }
+
+    // Build ingredient list with names (only removable ones)
+    const ingredients: IngredientInfo[] = removableMPs.map((pmp) => {
+      const mp = materiaPrima.find((m) => m.id === pmp.materia_prima_id);
+      return {
+        id: pmp.materia_prima_id,
+        name: mp?.name || 'Desconocido',
+        removed: false,
+      };
+    });
+
+    setIngredientsList(ingredients);
+    setCustomizingProduct(product);
+    setShowIngredientModal(true);
+  };
+
+  // Toggle ingredient removal in modal
+  const toggleIngredient = (ingredientId: string) => {
+    setIngredientsList((prev) =>
+      prev.map((ing) =>
+        ing.id === ingredientId ? { ...ing, removed: !ing.removed } : ing
+      )
+    );
+  };
+
+  // Confirm customization and add to cart
+  const confirmCustomization = () => {
+    if (!customizingProduct) return;
+
+    const removedIngredients = ingredientsList
+      .filter((ing) => ing.removed)
+      .map((ing) => ing.name);
+
+    addToCart(customizingProduct, removedIngredients);
+
+    // Reset modal state
+    setShowIngredientModal(false);
+    setCustomizingProduct(null);
+    setIngredientsList([]);
+  };
+
+  // Cancel customization
+  const cancelCustomization = () => {
+    setShowIngredientModal(false);
+    setCustomizingProduct(null);
+    setIngredientsList([]);
+  };
+
+  // ===== COMBO FUNCTIONS =====
+
+  // Open combo customization modal
+  const openComboModal = async (combo: Combo) => {
+    setCustomizingCombo(combo);
+
+    // Load slot products
+    const slotProducts: Record<string, Product[]> = {};
+    for (const slot of combo.slots) {
+      slotProducts[slot.id] = await getSlotProducts(slot);
+    }
+    setComboSlotProducts(slotProducts);
+
+    // Get default selections
+    const defaults = await getDefaultSelections(combo);
+    setComboSelections(defaults);
+
+    // Calculate initial price
+    const price = await calculateComboPrice(
+      combo,
+      defaults.map((s) => ({ productId: s.productId, quantity: 1 }))
+    );
+    setComboPrice(price);
+
+    setShowComboModal(true);
+  };
+
+  // Update combo selection for a slot
+  const updateComboSelection = async (
+    slotId: string,
+    slotIndex: number,
+    productId: string
+  ) => {
+    const slot = customizingCombo?.slots.find((s) => s.id === slotId);
+    const product = comboSlotProducts[slotId]?.find((p) => p.id === productId);
+
+    if (!slot || !product) return;
+
+    const newSelections = [...comboSelections];
+    // Find the selection for this slot at this index
+    let count = 0;
+    for (let i = 0; i < newSelections.length; i++) {
+      if (newSelections[i].slotId === slotId) {
+        if (count === slotIndex) {
+          newSelections[i] = {
+            ...newSelections[i],
+            productId: product.id,
+            productName: product.name,
+            productPrice: product.price,
+            removedIngredients: [],
+          };
+          break;
+        }
+        count++;
+      }
+    }
+
+    setComboSelections(newSelections);
+
+    // Recalculate price
+    if (customizingCombo) {
+      const price = await calculateComboPrice(
+        customizingCombo,
+        newSelections.map((s) => ({ productId: s.productId, quantity: 1 }))
+      );
+      setComboPrice(price);
+    }
+  };
+
+  // Confirm combo and add to cart
+  const confirmComboSelection = () => {
+    if (!customizingCombo) return;
+
+    // Create a combo cart item
+    const comboCartItem: CartItem = {
+      id: customizingCombo.id,
+      name: customizingCombo.name,
+      price: comboPrice,
+      category: 'combos',
+      stock: 999,
+      active: true,
+      production_cost: 0,
+      uses_materia_prima: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      quantity: 1,
+      cartItemId: `combo_${Date.now()}_${Math.random()
+        .toString(36)
+        .substr(2, 9)}`,
+      removedIngredients: [],
+      isCombo: true,
+      comboId: customizingCombo.id,
+      comboName: customizingCombo.name,
+      comboSelections: comboSelections,
+    };
+
+    setCart((prev) => [...prev, comboCartItem]);
+    toast.success(`${customizingCombo.name} agregado`);
+
+    // Reset modal state
+    setShowComboModal(false);
+    setCustomizingCombo(null);
+    setComboSelections([]);
+    setComboSlotProducts({});
+    setComboPrice(0);
+  };
+
+  // Cancel combo customization
+  const cancelComboSelection = () => {
+    setShowComboModal(false);
+    setCustomizingCombo(null);
+    setComboSelections([]);
+    setComboSlotProducts({});
+    setComboPrice(0);
+  };
+
+  const removeFromCart = (cartItemId: string) => {
     setCart((prevCart) => {
-      const newCart = prevCart.filter((item) => item.id !== productId);
+      const newCart = prevCart.filter((item) => item.cartItemId !== cartItemId);
 
       if (newCart.length === 0) {
         setShowPayment(false);
@@ -344,24 +639,24 @@ export function POSView() {
     });
   };
 
-  const updateQuantity = async (productId: string, quantity: number) => {
-    const product = products.find((p) => p.id === productId);
-    if (!product) return;
+  const updateQuantity = async (cartItemId: string, quantity: number) => {
+    const cartItem = cart.find((item) => item.cartItemId === cartItemId);
+    if (!cartItem) return;
 
     if (quantity <= 0) {
-      removeFromCart(productId);
+      removeFromCart(cartItemId);
       return;
     }
 
-    const availableStock = getProductStock(product);
+    const availableStock = getProductStock(cartItem);
 
     if (quantity > availableStock) {
       toast.error('Stock insuficiente');
       return;
     }
 
-    if (product.uses_materia_prima) {
-      const hasStock = await checkStockAvailability(product.id);
+    if (cartItem.uses_materia_prima) {
+      const hasStock = await checkStockAvailability(cartItem.id);
       if (!hasStock) {
         toast.error('Materia prima insuficiente para esta cantidad');
         return;
@@ -370,7 +665,7 @@ export function POSView() {
 
     setCart((prevCart) =>
       prevCart.map((item) =>
-        item.id === productId ? { ...item, quantity } : item
+        item.cartItemId === cartItemId ? { ...item, quantity } : item
       )
     );
   };
@@ -450,6 +745,7 @@ export function POSView() {
             product_name: item.product_name,
             quantity: item.quantity,
             product_price: item.product_price,
+            removed_ingredients: item.removedIngredients || [],
           })),
           total,
           payment_method: paymentMethod,
@@ -564,6 +860,7 @@ export function POSView() {
         product_price: item.price,
         production_cost: item.production_cost,
         quantity: item.quantity,
+        removedIngredients: item.removedIngredients,
       }));
 
       let billsChangeData: Record<number, number> | undefined;
@@ -898,7 +1195,8 @@ export function POSView() {
                           key={product.id}
                           product={product}
                           isLocked={isLayoutLocked}
-                          onAddToCart={addToCart}
+                          onAddToCart={(p) => addToCart(p)}
+                          onLongPress={handleProductLongPress}
                           getStock={getProductStock}
                         />
                       ))}
@@ -908,6 +1206,53 @@ export function POSView() {
               );
             })}
           </SortableContext>
+
+          {/* Combos Section */}
+          {activeCombos.length > 0 && (
+            <div className='mb-8'>
+              <h2
+                className='text-xl font-semibold mb-4 flex items-center gap-2'
+                style={{ color: 'var(--color-text)' }}
+              >
+                <Layers size={20} style={{ color: 'var(--color-primary)' }} />
+                Combos
+              </h2>
+              <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                {activeCombos.map((combo) => (
+                  <button
+                    key={combo.id}
+                    onClick={() => openComboModal(combo)}
+                    className='p-6 rounded-lg transition-transform active:scale-95 text-left relative'
+                    style={{
+                      backgroundColor: 'var(--color-accent)',
+                      color: 'var(--color-on-accent)',
+                    }}
+                  >
+                    <div className='text-lg font-bold mb-2'>{combo.name}</div>
+                    <div className='text-2xl font-bold mb-1'>
+                      {combo.price_type === 'fixed'
+                        ? formatPrice(combo.fixed_price || 0)
+                        : combo.discount_type === 'percentage'
+                        ? `-${combo.discount_value}%`
+                        : `-${formatPrice(combo.discount_value || 0)}`}
+                    </div>
+                    <div className='text-sm opacity-90'>
+                      {combo.slots.length} producto
+                      {combo.slots.length !== 1 ? 's' : ''}
+                    </div>
+                    <div
+                      className='absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-semibold'
+                      style={{
+                        backgroundColor: 'rgba(255,255,255,0.2)',
+                      }}
+                    >
+                      COMBO
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div
@@ -953,29 +1298,77 @@ export function POSView() {
               <div className='space-y-3'>
                 {cart.map((item) => (
                   <div
-                    key={item.id}
+                    key={item.cartItemId}
                     className='p-3 rounded-lg'
                     style={{ backgroundColor: 'var(--color-background)' }}
                   >
-                    <div className='flex items-center justify-between mb-2'>
-                      <div
-                        className='font-semibold'
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {item.name}
+                    <div className='flex items-center justify-between mb-1'>
+                      <div className='flex items-center gap-2'>
+                        <div
+                          className='font-semibold'
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {item.name}
+                        </div>
+                        {item.isCombo && (
+                          <span
+                            className='text-xs px-1.5 py-0.5 rounded'
+                            style={{
+                              backgroundColor: 'var(--color-accent)',
+                              color: 'var(--color-on-accent)',
+                            }}
+                          >
+                            COMBO
+                          </span>
+                        )}
                       </div>
                       <button
-                        onClick={() => removeFromCart(item.id)}
+                        onClick={() => removeFromCart(item.cartItemId)}
                         className='text-red-500'
                       >
                         <X size={18} />
                       </button>
                     </div>
+                    {/* Combo selections display */}
+                    {item.isCombo && item.comboSelections && (
+                      <div
+                        className='text-xs mb-2 pl-2 border-l-2'
+                        style={{
+                          borderColor: 'var(--color-accent)',
+                          color: 'var(--color-text)',
+                          opacity: 0.8,
+                        }}
+                      >
+                        {item.comboSelections.map((sel, idx) => (
+                          <div key={idx} className='mb-0.5'>
+                            <span className='font-medium'>{sel.slotName}:</span>{' '}
+                            {sel.productName}
+                            {sel.removedIngredients.length > 0 && (
+                              <span
+                                className='italic ml-1'
+                                style={{ color: 'var(--color-primary)' }}
+                              >
+                                (sin {sel.removedIngredients.join(', ')})
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Regular product removed ingredients */}
+                    {!item.isCombo && item.removedIngredients.length > 0 && (
+                      <div
+                        className='text-xs mb-2 italic'
+                        style={{ color: 'var(--color-primary)' }}
+                      >
+                        Sin: {item.removedIngredients.join(', ')}
+                      </div>
+                    )}
                     <div className='flex items-center justify-between'>
                       <div className='flex items-center gap-2'>
                         <button
                           onClick={() =>
-                            updateQuantity(item.id, item.quantity - 1)
+                            updateQuantity(item.cartItemId, item.quantity - 1)
                           }
                           className='w-8 h-8 rounded'
                           style={{
@@ -994,7 +1387,7 @@ export function POSView() {
                         </span>
                         <button
                           onClick={() =>
-                            updateQuantity(item.id, item.quantity + 1)
+                            updateQuantity(item.cartItemId, item.quantity + 1)
                           }
                           className='w-8 h-8 rounded'
                           style={{
@@ -1367,15 +1760,28 @@ export function POSView() {
                         {order.items.map((item, idx) => (
                           <div
                             key={idx}
-                            className='flex justify-between text-sm'
+                            className='text-sm'
                             style={{ color: 'var(--color-text)' }}
                           >
-                            <span>
-                              {item.quantity}x {item.product_name}
-                            </span>
-                            <span className='opacity-60'>
-                              {formatPrice(item.product_price * item.quantity)}
-                            </span>
+                            <div className='flex justify-between'>
+                              <span>
+                                {item.quantity}x {item.product_name}
+                              </span>
+                              <span className='opacity-60'>
+                                {formatPrice(
+                                  item.product_price * item.quantity
+                                )}
+                              </span>
+                            </div>
+                            {item.removed_ingredients &&
+                              item.removed_ingredients.length > 0 && (
+                                <div
+                                  className='text-xs italic ml-4'
+                                  style={{ color: 'var(--color-primary)' }}
+                                >
+                                  Sin: {item.removed_ingredients.join(', ')}
+                                </div>
+                              )}
                           </div>
                         ))}
                       </div>
@@ -1412,6 +1818,247 @@ export function POSView() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ingredient Customization Modal */}
+      {showIngredientModal && customizingProduct && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-md rounded-xl shadow-2xl overflow-hidden'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b'
+              style={{ borderColor: 'var(--color-background-accent)' }}
+            >
+              <h2
+                className='text-xl font-bold'
+                style={{ color: 'var(--color-text)' }}
+              >
+                {customizingProduct.name}
+              </h2>
+              <button
+                onClick={cancelCustomization}
+                className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={20} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className='p-6'>
+              <p
+                className='text-sm mb-4 opacity-70'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Selecciona los ingredientes a quitar:
+              </p>
+
+              <div className='space-y-3 mb-6'>
+                {ingredientsList.map((ingredient) => (
+                  <button
+                    key={ingredient.id}
+                    onClick={() => toggleIngredient(ingredient.id)}
+                    className='w-full flex items-center justify-between p-3 rounded-lg transition-all'
+                    style={{
+                      backgroundColor: ingredient.removed
+                        ? 'var(--color-primary)'
+                        : 'var(--color-background)',
+                      color: ingredient.removed
+                        ? 'var(--color-on-primary)'
+                        : 'var(--color-text)',
+                    }}
+                  >
+                    <span className={ingredient.removed ? 'line-through' : ''}>
+                      {ingredient.name}
+                    </span>
+                    {ingredient.removed && (
+                      <span className='text-sm font-semibold'>SIN</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              <div className='flex gap-3'>
+                <button
+                  onClick={cancelCustomization}
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmCustomization}
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-accent)',
+                    color: 'var(--color-on-accent)',
+                  }}
+                >
+                  Agregar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Combo Customization Modal */}
+      {showComboModal && customizingCombo && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-lg max-h-[90vh] overflow-auto rounded-xl shadow-2xl'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b sticky top-0 z-10'
+              style={{
+                borderColor: 'var(--color-background-accent)',
+                backgroundColor: 'var(--color-background-secondary)',
+              }}
+            >
+              <div>
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {customizingCombo.name}
+                </h2>
+                <p
+                  className='text-2xl font-bold'
+                  style={{ color: 'var(--color-accent)' }}
+                >
+                  {formatPrice(comboPrice)}
+                </p>
+              </div>
+              <button
+                onClick={cancelComboSelection}
+                className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={20} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className='p-6 space-y-6'>
+              {customizingCombo.slots.map((slot) => {
+                const slotProducts = comboSlotProducts[slot.id] || [];
+                const slotSelections = comboSelections.filter(
+                  (s) => s.slotId === slot.id
+                );
+
+                return (
+                  <div key={slot.id}>
+                    <h3
+                      className='font-semibold mb-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {slot.name} {slot.quantity > 1 && `(x${slot.quantity})`}
+                    </h3>
+
+                    {slotSelections.map((selection, selIndex) => (
+                      <div
+                        key={`${slot.id}-${selIndex}`}
+                        className='mb-4 p-3 rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background)',
+                        }}
+                      >
+                        {slot.quantity > 1 && (
+                          <p
+                            className='text-xs mb-2 opacity-60'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            Opción {selIndex + 1}
+                          </p>
+                        )}
+
+                        {/* Product selector for dynamic slots */}
+                        {slot.is_dynamic && slotProducts.length > 1 ? (
+                          <select
+                            value={selection.productId}
+                            onChange={(e) =>
+                              updateComboSelection(
+                                slot.id,
+                                selIndex,
+                                e.target.value
+                              )
+                            }
+                            className='w-full p-2 rounded mb-2'
+                            style={{
+                              backgroundColor:
+                                'var(--color-background-secondary)',
+                              color: 'var(--color-text)',
+                              border:
+                                '1px solid var(--color-background-accent)',
+                            }}
+                          >
+                            {slotProducts.map((product) => (
+                              <option key={product.id} value={product.id}>
+                                {product.name} - {formatPrice(product.price)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <p
+                            className='font-medium mb-2'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            {selection.productName}
+                          </p>
+                        )}
+
+                        {/* Show removed ingredients if any */}
+                        {selection.removedIngredients.length > 0 && (
+                          <div
+                            className='text-xs italic'
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            Sin: {selection.removedIngredients.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div
+              className='px-6 py-4 border-t sticky bottom-0'
+              style={{
+                borderColor: 'var(--color-background-accent)',
+                backgroundColor: 'var(--color-background-secondary)',
+              }}
+            >
+              <div className='flex gap-3'>
+                <button
+                  onClick={cancelComboSelection}
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmComboSelection}
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-accent)',
+                    color: 'var(--color-on-accent)',
+                  }}
+                >
+                  Agregar - {formatPrice(comboPrice)}
+                </button>
+              </div>
             </div>
           </div>
         </div>

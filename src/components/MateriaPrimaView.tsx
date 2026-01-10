@@ -143,84 +143,33 @@ export function MateriaPrimaView() {
       </div>
 
       {showForm && (
-        <div
-          className='rounded-lg shadow-md p-6 mb-6'
-          style={{ backgroundColor: 'var(--color-background-secondary)' }}
-        >
-          <h2
-            className='text-xl font-bold mb-4'
-            style={{ color: 'var(--color-text)' }}
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-md max-h-[90vh] overflow-auto rounded-xl shadow-2xl p-6 mx-4'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
           >
-            {editingId ? 'Editar Materia Prima' : 'Nueva Materia Prima'}
-          </h2>
-          <form onSubmit={handleSubmit} className='space-y-4'>
-            <div>
-              <label
-                className='block text-sm font-medium mb-1'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Nombre
-              </label>
-              <input
-                type='text'
-                required
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                placeholder='Ej: Pan, Carne, Queso'
-                className='w-full px-3 py-2 border rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                  borderColor: 'var(--color-text)',
-                }}
-              />
-            </div>
-
-            <div>
-              <label
-                className='block text-sm font-medium mb-1'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Unidad de Medida
-              </label>
-              <select
-                value={formData.unit}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    unit: e.target.value as 'units' | 'kg',
-                  })
-                }
-                className='w-full px-3 py-2 border rounded-lg'
-                style={{
-                  backgroundColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                  borderColor: 'var(--color-text)',
-                }}
-              >
-                <option value='units'>Unidades</option>
-                <option value='kg'>Kilogramos</option>
-              </select>
-            </div>
-
-            <div className='grid grid-cols-2 gap-4'>
+            <h2
+              className='text-xl font-bold mb-4'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {editingId ? 'Editar Materia Prima' : 'Nueva Materia Prima'}
+            </h2>
+            <form onSubmit={handleSubmit} className='space-y-4'>
               <div>
                 <label
                   className='block text-sm font-medium mb-1'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  Stock Disponible
+                  Nombre
                 </label>
                 <input
-                  type='number'
-                  step='0.001'
+                  type='text'
                   required
-                  value={formData.stock}
+                  value={formData.name}
                   onChange={(e) =>
-                    setFormData({ ...formData, stock: e.target.value })
+                    setFormData({ ...formData, name: e.target.value })
                   }
+                  placeholder='Ej: Pan, Carne, Queso'
                   className='w-full px-3 py-2 border rounded-lg'
                   style={{
                     backgroundColor: 'var(--color-background-accent)',
@@ -235,15 +184,15 @@ export function MateriaPrimaView() {
                   className='block text-sm font-medium mb-1'
                   style={{ color: 'var(--color-text)' }}
                 >
-                  Costo por Unidad ($)
+                  Unidad de Medida
                 </label>
-                <input
-                  type='number'
-                  step='0.01'
-                  required
-                  value={formData.cost_per_unit}
+                <select
+                  value={formData.unit}
                   onChange={(e) =>
-                    setFormData({ ...formData, cost_per_unit: e.target.value })
+                    setFormData({
+                      ...formData,
+                      unit: e.target.value as 'units' | 'kg',
+                    })
                   }
                   className='w-full px-3 py-2 border rounded-lg'
                   style={{
@@ -251,32 +200,88 @@ export function MateriaPrimaView() {
                     color: 'var(--color-text)',
                     borderColor: 'var(--color-text)',
                   }}
-                />
+                >
+                  <option value='units'>Unidades</option>
+                  <option value='kg'>Kilogramos</option>
+                </select>
               </div>
-            </div>
 
-            <div className='flex gap-2'>
-              <button
-                type='submit'
-                className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
-                style={{
-                  backgroundColor: 'var(--color-primary)',
-                  color: 'var(--color-on-primary)',
-                }}
-              >
-                <Save size={18} />
-                {editingId ? 'Actualizar' : 'Guardar'}
-              </button>
-              <button
-                type='button'
-                onClick={handleCancel}
-                className='flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold'
-              >
-                <X size={18} />
-                Cancelar
-              </button>
-            </div>
-          </form>
+              <div className='grid grid-cols-2 gap-4'>
+                <div>
+                  <label
+                    className='block text-sm font-medium mb-1'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Stock Disponible
+                  </label>
+                  <input
+                    type='number'
+                    step='0.001'
+                    required
+                    value={formData.stock}
+                    onChange={(e) =>
+                      setFormData({ ...formData, stock: e.target.value })
+                    }
+                    className='w-full px-3 py-2 border rounded-lg'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                      borderColor: 'var(--color-text)',
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    className='block text-sm font-medium mb-1'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Costo por Unidad ($)
+                  </label>
+                  <input
+                    type='number'
+                    step='0.01'
+                    required
+                    value={formData.cost_per_unit}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        cost_per_unit: e.target.value,
+                      })
+                    }
+                    className='w-full px-3 py-2 border rounded-lg'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                      borderColor: 'var(--color-text)',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div className='flex gap-2'>
+                <button
+                  type='submit'
+                  className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
+                  style={{
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'var(--color-on-primary)',
+                  }}
+                >
+                  <Save size={18} />
+                  {editingId ? 'Actualizar' : 'Guardar'}
+                </button>
+                <button
+                  type='button'
+                  onClick={handleCancel}
+                  className='flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-300 dark:bg-gray-600 dark:text-white font-semibold'
+                >
+                  <X size={18} />
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

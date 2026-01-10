@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db, MateriaPrima, ProductMateriaPrima } from '../lib/indexeddb';
+import {
+  db,
+  MateriaPrima,
+  ProductMateriaPrima,
+  Product,
+} from '../lib/indexeddb';
 
 export function useMateriaPrima() {
   const [materiaPrima, setMateriaPrima] = useState<MateriaPrima[]>([]);
@@ -64,6 +69,12 @@ export function useMateriaPrima() {
         updated_at: new Date().toISOString(),
       };
       await db.put('materia_prima', updated);
+
+      // If cost changed, recalculate affected products
+      if (updates.cost_per_unit !== undefined) {
+        await recalculateAffectedProductsCost(id);
+      }
+
       await loadMateriaPrima();
     } catch (error) {
       console.error('Error updating materia prima:', error);
@@ -123,7 +134,11 @@ export function useMateriaPrima() {
 
   const setProductMateriaPrima = async (
     productId: string,
-    items: Array<{ materia_prima_id: string; quantity: number }>
+    items: Array<{
+      materia_prima_id: string;
+      quantity: number;
+      removable: boolean;
+    }>
   ) => {
     try {
       await db.init();
@@ -144,6 +159,7 @@ export function useMateriaPrima() {
           product_id: productId,
           materia_prima_id: item.materia_prima_id,
           quantity: item.quantity,
+          removable: item.removable,
           created_at: new Date().toISOString(),
         };
         await db.add('product_materia_prima', newLink);
@@ -180,6 +196,37 @@ export function useMateriaPrima() {
     } catch (error) {
       console.error('Error calculating product cost:', error);
       return 0;
+    }
+  };
+
+  const recalculateAffectedProductsCost = async (materiaPrimaId: string) => {
+    try {
+      await db.init();
+
+      // Find all product links using this materia prima
+      const links = await db.getAllByIndex<ProductMateriaPrima>(
+        'product_materia_prima',
+        'materia_prima_id',
+        materiaPrimaId
+      );
+
+      // Get unique product IDs
+      const productIds = [...new Set(links.map((l) => l.product_id))];
+
+      // Recalculate and update each product
+      for (const productId of productIds) {
+        const cost = await calculateProductCost(productId);
+        const product = await db.get<Product>('products', productId);
+        if (product && product.uses_materia_prima) {
+          await db.put('products', {
+            ...product,
+            production_cost: cost,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error recalculating affected products cost:', error);
     }
   };
 

@@ -1,5 +1,5 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export interface MateriaPrima {
   id: string;
@@ -16,12 +16,14 @@ export interface ProductMateriaPrima {
   product_id: string;
   materia_prima_id: string;
   quantity: number;
+  removable: boolean;
   created_at: string;
 }
 
 export interface Product {
   id: string;
   name: string;
+  description?: string;
   price: number;
   category: string;
   stock: number;
@@ -113,6 +115,29 @@ export interface AppSettings {
   category_order?: string[];
   kds_enabled?: boolean;
   kds_url?: string;
+  updated_at: string;
+}
+
+export interface ComboSlot {
+  id: string;
+  name: string;
+  is_dynamic: boolean;
+  product_ids: string[];
+  default_product_id: string;
+  quantity: number;
+}
+
+export interface Combo {
+  id: string;
+  name: string;
+  description?: string;
+  price_type: 'fixed' | 'calculated';
+  fixed_price?: number;
+  discount_type?: 'percentage' | 'fixed';
+  discount_value?: number;
+  slots: ComboSlot[];
+  active: boolean;
+  created_at: string;
   updated_at: string;
 }
 
@@ -214,6 +239,12 @@ class IndexedDBService {
 
         if (!db.objectStoreNames.contains('app_settings')) {
           db.createObjectStore('app_settings', { keyPath: 'id' });
+        }
+
+        if (!db.objectStoreNames.contains('combos')) {
+          const combosStore = db.createObjectStore('combos', { keyPath: 'id' });
+          combosStore.createIndex('name', 'name', { unique: false });
+          combosStore.createIndex('active', 'active', { unique: false });
         }
       };
     });
@@ -318,6 +349,7 @@ class IndexedDBService {
       logo_config,
       materia_prima,
       product_materia_prima,
+      combos,
     ] = await Promise.all([
       this.getAll<Product>('products'),
       this.getAll<Sale>('sales'),
@@ -327,6 +359,7 @@ class IndexedDBService {
       this.getAll<LogoConfig>('logo_config'),
       this.getAll<MateriaPrima>('materia_prima'),
       this.getAll<ProductMateriaPrima>('product_materia_prima'),
+      this.hasStore('combos') ? this.getAll<Combo>('combos') : [],
     ]);
 
     const data = {
@@ -338,6 +371,7 @@ class IndexedDBService {
       logo_config,
       materia_prima,
       product_materia_prima,
+      combos,
     };
 
     return JSON.stringify(data, null, 2);
@@ -354,6 +388,7 @@ class IndexedDBService {
     await this.clear('logo_config');
     await this.clear('materia_prima');
     await this.clear('product_materia_prima');
+    if (this.hasStore('combos')) await this.clear('combos');
 
     for (const product of data.products || []) {
       await this.add('products', product);
@@ -379,10 +414,15 @@ class IndexedDBService {
     for (const pmp of data.product_materia_prima || []) {
       await this.add('product_materia_prima', pmp);
     }
+    if (this.hasStore('combos')) {
+      for (const combo of data.combos || []) {
+        await this.add('combos', combo);
+      }
+    }
   }
 
   async resetDatabase(): Promise<void> {
-    await Promise.all([
+    const promises = [
       this.clear('products'),
       this.clear('sales'),
       this.clear('sale_items'),
@@ -391,7 +431,11 @@ class IndexedDBService {
       this.clear('logo_config'),
       this.clear('materia_prima'),
       this.clear('product_materia_prima'),
-    ]);
+    ];
+    if (this.hasStore('combos')) {
+      promises.push(this.clear('combos'));
+    }
+    await Promise.all(promises);
   }
 }
 
