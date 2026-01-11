@@ -14,6 +14,9 @@ import {
   Beef,
   Clock,
   Pencil,
+  User,
+  Home,
+  Truck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -70,6 +73,8 @@ interface KDSOrder {
   total: number;
   status: 'pending' | 'preparing' | 'completed';
   scheduled_time?: string;
+  customer_name?: string;
+  order_type?: 'pickup' | 'delivery';
   created_at: string;
   finished_at?: string;
 }
@@ -389,6 +394,10 @@ export function POSView() {
   // Scheduled time for order
   const [scheduledTime, setScheduledTime] = useState<string>('');
 
+  // Customer info for order
+  const [customerName, setCustomerName] = useState<string>('');
+  const [orderType, setOrderType] = useState<'pickup' | 'delivery'>('pickup');
+
   // Editing order state
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
@@ -397,6 +406,10 @@ export function POSView() {
   const [editingKdsOrder, setEditingKdsOrder] = useState<KDSOrder | null>(null);
   const [editModalItems, setEditModalItems] = useState<KDSOrderItem[]>([]);
   const [editScheduledTime, setEditScheduledTime] = useState<string>('');
+  const [editCustomerName, setEditCustomerName] = useState<string>('');
+  const [editOrderType, setEditOrderType] = useState<'pickup' | 'delivery'>(
+    'pickup'
+  );
 
   // Edit ingredient sub-modal state (within edit order modal)
   const [editIngredientItemIndex, setEditIngredientItemIndex] = useState<
@@ -844,7 +857,9 @@ export function POSView() {
     saleNumber: string,
     items: SaleItem[],
     total: number,
-    scheduledTimeISO?: string
+    scheduledTimeISO?: string,
+    customerNameParam?: string,
+    orderTypeParam?: 'pickup' | 'delivery'
   ) => {
     try {
       await db.init();
@@ -870,6 +885,8 @@ export function POSView() {
           total,
           payment_method: paymentMethod,
           scheduled_time: scheduledTimeISO,
+          customer_name: customerNameParam || null,
+          order_type: orderTypeParam || null,
         }),
       });
 
@@ -1017,6 +1034,10 @@ export function POSView() {
         setEditScheduledTime('');
       }
 
+      // Set customer name and order type
+      setEditCustomerName(order.customer_name || '');
+      setEditOrderType(order.order_type || 'pickup');
+
       // Open edit modal
       setShowEditModal(true);
     } catch (error) {
@@ -1030,6 +1051,8 @@ export function POSView() {
     setEditingKdsOrder(null);
     setEditModalItems([]);
     setEditScheduledTime('');
+    setEditCustomerName('');
+    setEditOrderType('pickup');
   };
 
   const updateEditItemQuantity = (index: number, delta: number) => {
@@ -1080,6 +1103,8 @@ export function POSView() {
             items: editModalItems,
             total: newTotal,
             scheduled_time: scheduledTimeISO,
+            customer_name: editCustomerName || null,
+            order_type: editOrderType,
           }),
         }
       );
@@ -1176,6 +1201,8 @@ export function POSView() {
     setEditingOrderId(null);
     setCart([]);
     setScheduledTime('');
+    setCustomerName('');
+    setOrderType('pickup');
     setCashReceived(0);
     setChangeBreakdown(null);
     setBillHistory([]);
@@ -1265,7 +1292,14 @@ export function POSView() {
       }
 
       if (saleData) {
-        await sendToKDS(saleData.sale_number, items, total, scheduledTimeISO);
+        await sendToKDS(
+          saleData.sale_number,
+          items,
+          total,
+          scheduledTimeISO,
+          customerName || undefined,
+          orderType
+        );
         // Sync theme to KDS with each sale to ensure KDS has latest theme
         await syncThemeToKDS();
       }
@@ -1287,6 +1321,8 @@ export function POSView() {
       setPaymentMethod('cash');
       setBillHistory([]);
       setScheduledTime('');
+      setCustomerName('');
+      setOrderType('pickup');
       setNextSaleNumber((prev) => (prev !== null ? prev + 1 : prev));
 
       toast.success(
@@ -1723,6 +1759,8 @@ export function POSView() {
                       setBillHistory([]);
                       setPaymentMethod('cash');
                       setScheduledTime('');
+                      setCustomerName('');
+                      setOrderType('pickup');
                     }
                   }}
                   className='text-red-500 hover:text-red-700'
@@ -1889,6 +1927,75 @@ export function POSView() {
                   Limpiar hora
                 </button>
               )}
+            </div>
+
+            {/* Customer Name */}
+            <div className='mb-4'>
+              <label
+                className='flex items-center gap-2 text-sm mb-2'
+                style={{ color: 'var(--color-text)' }}
+              >
+                <User size={16} />
+                <span>Nombre del cliente (opcional)</span>
+              </label>
+              <input
+                type='text'
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                placeholder='Ej: Juan'
+                className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                style={{
+                  backgroundColor: 'var(--color-background)',
+                  borderColor: 'var(--color-background-accent)',
+                  color: 'var(--color-text)',
+                }}
+              />
+            </div>
+
+            {/* Order Type (Pickup / Delivery) */}
+            <div className='mb-4'>
+              <label
+                className='flex items-center gap-2 text-sm mb-2'
+                style={{ color: 'var(--color-text)' }}
+              >
+                <span>Tipo de entrega</span>
+              </label>
+              <div className='flex gap-2'>
+                <button
+                  onClick={() => setOrderType('pickup')}
+                  className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                  style={{
+                    backgroundColor:
+                      orderType === 'pickup'
+                        ? 'var(--color-accent)'
+                        : 'var(--color-background)',
+                    color:
+                      orderType === 'pickup'
+                        ? 'var(--color-on-accent)'
+                        : 'var(--color-text)',
+                  }}
+                >
+                  <Home size={16} />
+                  Retiro
+                </button>
+                <button
+                  onClick={() => setOrderType('delivery')}
+                  className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                  style={{
+                    backgroundColor:
+                      orderType === 'delivery'
+                        ? 'var(--color-accent)'
+                        : 'var(--color-background)',
+                    color:
+                      orderType === 'delivery'
+                        ? 'var(--color-on-accent)'
+                        : 'var(--color-text)',
+                  }}
+                >
+                  <Truck size={16} />
+                  Delivery
+                </button>
+              </div>
             </div>
 
             <div
@@ -2211,6 +2318,39 @@ export function POSView() {
                           >
                             #{order.sale_number}
                           </span>
+                          {order.customer_name && (
+                            <div
+                              className='flex items-center gap-1 text-xs mt-0.5'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              <User size={12} />
+                              {order.customer_name}
+                            </div>
+                          )}
+                          {order.order_type && (
+                            <span
+                              className='inline-block px-2 py-0.5 rounded text-xs font-semibold mt-1'
+                              style={{
+                                backgroundColor:
+                                  order.order_type === 'delivery'
+                                    ? '#3b82f6'
+                                    : '#10b981',
+                                color: 'white',
+                              }}
+                            >
+                              {order.order_type === 'delivery' ? (
+                                <>
+                                  <Truck size={10} className='inline mr-1' />
+                                  Delivery
+                                </>
+                              ) : (
+                                <>
+                                  <Home size={10} className='inline mr-1' />
+                                  Retiro
+                                </>
+                              )}
+                            </span>
+                          )}
                           {order.scheduled_time && (
                             <div
                               className='flex items-center gap-1 text-xs mt-1 font-medium'
@@ -2659,6 +2799,85 @@ export function POSView() {
                     Quitar hora programada (ASAP)
                   </button>
                 )}
+              </div>
+
+              {/* Customer Name */}
+              <div
+                className='mb-6 p-4 rounded-lg'
+                style={{ backgroundColor: 'var(--color-background-secondary)' }}
+              >
+                <label
+                  className='block text-sm font-semibold mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <User
+                    size={16}
+                    className='inline mr-2'
+                    style={{ color: 'var(--color-accent)' }}
+                  />
+                  Nombre del Cliente
+                </label>
+                <input
+                  type='text'
+                  value={editCustomerName}
+                  onChange={(e) => setEditCustomerName(e.target.value)}
+                  placeholder='Ej: Juan'
+                  className='w-full p-3 rounded-lg text-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--color-text)',
+                    border: '2px solid var(--color-background-accent)',
+                  }}
+                />
+              </div>
+
+              {/* Order Type */}
+              <div
+                className='mb-6 p-4 rounded-lg'
+                style={{ backgroundColor: 'var(--color-background-secondary)' }}
+              >
+                <label
+                  className='block text-sm font-semibold mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Tipo de Entrega
+                </label>
+                <div className='flex gap-3'>
+                  <button
+                    onClick={() => setEditOrderType('pickup')}
+                    className='flex-1 flex items-center justify-center gap-2 p-3 rounded-lg font-semibold text-lg transition-all'
+                    style={{
+                      backgroundColor:
+                        editOrderType === 'pickup'
+                          ? 'var(--color-accent)'
+                          : 'var(--color-background)',
+                      color:
+                        editOrderType === 'pickup'
+                          ? 'var(--color-on-accent)'
+                          : 'var(--color-text)',
+                    }}
+                  >
+                    <Home size={20} />
+                    Retiro
+                  </button>
+                  <button
+                    onClick={() => setEditOrderType('delivery')}
+                    className='flex-1 flex items-center justify-center gap-2 p-3 rounded-lg font-semibold text-lg transition-all'
+                    style={{
+                      backgroundColor:
+                        editOrderType === 'delivery'
+                          ? 'var(--color-accent)'
+                          : 'var(--color-background)',
+                      color:
+                        editOrderType === 'delivery'
+                          ? 'var(--color-on-accent)'
+                          : 'var(--color-text)',
+                    }}
+                  >
+                    <Truck size={20} />
+                    Delivery
+                  </button>
+                </div>
               </div>
 
               {/* Items */}
