@@ -392,6 +392,20 @@ export function POSView() {
   // Editing order state
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
+  // Full-screen edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingKdsOrder, setEditingKdsOrder] = useState<KDSOrder | null>(null);
+  const [editModalItems, setEditModalItems] = useState<KDSOrderItem[]>([]);
+  const [editScheduledTime, setEditScheduledTime] = useState<string>('');
+
+  // Edit ingredient sub-modal state (within edit order modal)
+  const [editIngredientItemIndex, setEditIngredientItemIndex] = useState<
+    number | null
+  >(null);
+  const [editIngredientsList, setEditIngredientsList] = useState<
+    { name: string; removed: boolean }[]
+  >([]);
+
   const activeCombos = combos.filter((c) => c.active);
 
   // State for sorted combos (for drag and drop)
@@ -984,50 +998,178 @@ export function POSView() {
 
   const loadOrderForEdit = async (order: KDSOrder) => {
     try {
-      // Convert KDS order items back to cart items
-      const cartItems: CartItem[] = [];
+      // Deep copy items for editing
+      const items = order.items.map((item) => ({
+        ...item,
+        removed_ingredients: [...(item.removed_ingredients || [])],
+      }));
 
-      for (const item of order.items) {
-        // Find the product by name
-        const product = products.find((p) => p.name === item.product_name);
-        if (product) {
-          cartItems.push({
-            ...product,
-            quantity: item.quantity,
-            cartItemId: `edit_${Date.now()}_${Math.random()
-              .toString(36)
-              .substr(2, 9)}`,
-            removedIngredients: item.removed_ingredients || [],
-          });
-        }
-      }
-
-      if (cartItems.length === 0) {
-        toast.error('No se pudieron cargar los productos del pedido');
-        return;
-      }
-
-      // Set cart and editing state
-      setCart(cartItems);
-      setEditingOrderId(order.id);
+      setEditingKdsOrder(order);
+      setEditModalItems(items);
 
       // Set scheduled time if exists
       if (order.scheduled_time) {
         const scheduledDate = new Date(order.scheduled_time);
         const hours = scheduledDate.getHours().toString().padStart(2, '0');
         const minutes = scheduledDate.getMinutes().toString().padStart(2, '0');
-        setScheduledTime(`${hours}:${minutes}`);
+        setEditScheduledTime(`${hours}:${minutes}`);
       } else {
-        setScheduledTime('');
+        setEditScheduledTime('');
       }
 
-      // Close KDS panel
-      setShowKdsPanel(false);
-      toast.success(`Editando pedido #${order.sale_number}`);
+      // Open edit modal
+      setShowEditModal(true);
     } catch (error) {
       console.error('Error loading order for edit:', error);
       toast.error('Error al cargar el pedido');
     }
+  };
+
+  const closeEditModal = () => {
+    setShowEditModal(false);
+    setEditingKdsOrder(null);
+    setEditModalItems([]);
+    setEditScheduledTime('');
+  };
+
+  const updateEditItemQuantity = (index: number, delta: number) => {
+    setEditModalItems((prev) => {
+      const newItems = [...prev];
+      const newQty = newItems[index].quantity + delta;
+      if (newQty < 1) {
+        // Remove item if quantity goes below 1
+        newItems.splice(index, 1);
+      } else {
+        newItems[index] = { ...newItems[index], quantity: newQty };
+      }
+      return newItems;
+    });
+  };
+
+  const saveOrderEdit = async () => {
+    if (!editingKdsOrder || !kdsUrl) return;
+
+    try {
+      // Calculate new total
+      const newTotal = editModalItems.reduce(
+        (sum, item) => sum + item.product_price * item.quantity,
+        0
+      );
+
+      // Convert scheduled time to ISO if set
+      let scheduledTimeISO: string | null = null;
+      if (editScheduledTime) {
+        const today = new Date();
+        const [hours, minutes] = editScheduledTime.split(':').map(Number);
+        today.setHours(hours, minutes, 0, 0);
+        // If the time is in the past, assume it's for tomorrow
+        if (today < new Date()) {
+          today.setDate(today.getDate() + 1);
+        }
+        scheduledTimeISO = today.toISOString();
+      }
+
+      const response = await fetch(
+        `${kdsUrl}/api/orders/${editingKdsOrder.id}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            items: editModalItems,
+            total: newTotal,
+            scheduled_time: scheduledTimeISO,
+          }),
+        }
+      );
+
+      if (response.ok) {
+        toast.success(`Pedido #${editingKdsOrder.sale_number} actualizado`);
+        closeEditModal();
+        // Refresh KDS orders
+        fetchKdsOrders();
+      } else {
+        throw new Error('Failed to update order');
+      }
+    } catch (error) {
+      console.error('Error saving order edit:', error);
+      toast.error('Error al guardar los cambios');
+    }
+  };
+
+  // Get available ingredients for a product by name (for edit modal)
+  const getRemovableIngredientsForProduct = (productName: string): string[] => {
+    const product = products.find((p) => p.name === productName);
+    if (!product?.materia_prima?.length) return [];
+
+    const removable: string[] = [];
+    for (const mp of product.materia_prima) {
+      if (mp.removable) {
+        const mpData = materiaPrima.find((m) => m.id === mp.materia_prima_id);
+        if (mpData) {
+          removable.push(mpData.name);
+        }
+      }
+    }
+    return removable;
+  };
+
+  // Open ingredient sub-modal for an item in the edit modal
+  const openEditIngredientModal = (itemIndex: number) => {
+    const item = editModalItems[itemIndex];
+    const removableIngredients = getRemovableIngredientsForProduct(
+      item.product_name
+    );
+
+    if (removableIngredients.length === 0) {
+      toast.info('Este producto no tiene ingredientes removibles');
+      return;
+    }
+
+    const ingredientsList = removableIngredients.map((name) => ({
+      name,
+      removed: (item.removed_ingredients || []).includes(name),
+    }));
+
+    setEditIngredientItemIndex(itemIndex);
+    setEditIngredientsList(ingredientsList);
+  };
+
+  // Toggle ingredient in the sub-modal
+  const toggleEditIngredient = (ingredientName: string) => {
+    setEditIngredientsList((prev) =>
+      prev.map((ing) =>
+        ing.name === ingredientName ? { ...ing, removed: !ing.removed } : ing
+      )
+    );
+  };
+
+  // Confirm ingredient changes and close sub-modal
+  const confirmEditIngredients = () => {
+    if (editIngredientItemIndex === null) return;
+
+    const removedIngredients = editIngredientsList
+      .filter((ing) => ing.removed)
+      .map((ing) => ing.name);
+
+    setEditModalItems((prev) => {
+      const newItems = [...prev];
+      newItems[editIngredientItemIndex] = {
+        ...newItems[editIngredientItemIndex],
+        removed_ingredients: removedIngredients,
+      };
+      return newItems;
+    });
+
+    setEditIngredientItemIndex(null);
+    setEditIngredientsList([]);
+  };
+
+  // Cancel ingredient editing sub-modal
+  const cancelEditIngredients = () => {
+    setEditIngredientItemIndex(null);
+    setEditIngredientsList([]);
   };
 
   const cancelEdit = () => {
@@ -2086,6 +2228,7 @@ export function POSView() {
                               ).toLocaleTimeString('es-AR', {
                                 hour: '2-digit',
                                 minute: '2-digit',
+                                hour12: false,
                               })}
                               {new Date(order.scheduled_time).getTime() <
                                 Date.now() && (
@@ -2441,6 +2584,341 @@ export function POSView() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full-Screen Edit Order Modal */}
+      {showEditModal && editingKdsOrder && (
+        <div className='fixed inset-0 z-50 flex flex-col bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full h-full flex flex-col'
+            style={{ backgroundColor: 'var(--color-background)' }}
+          >
+            {/* Header */}
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b shrink-0'
+              style={{
+                borderColor: 'var(--color-background-accent)',
+                backgroundColor: 'var(--color-background-secondary)',
+              }}
+            >
+              <div className='flex items-center gap-3'>
+                <Pencil size={24} style={{ color: 'var(--color-primary)' }} />
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Editar Pedido #{editingKdsOrder.sale_number}
+                </h2>
+              </div>
+              <button
+                onClick={closeEditModal}
+                className='flex justify-center items-center p-2 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={24} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className='flex-1 overflow-auto p-6'>
+              {/* Scheduled Time */}
+              <div
+                className='mb-6 p-4 rounded-lg'
+                style={{ backgroundColor: 'var(--color-background-secondary)' }}
+              >
+                <label
+                  className='block text-sm font-semibold mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <Clock
+                    size={16}
+                    className='inline mr-2'
+                    style={{ color: 'var(--color-accent)' }}
+                  />
+                  Hora de Entrega
+                </label>
+                <input
+                  type='time'
+                  value={editScheduledTime}
+                  onChange={(e) => setEditScheduledTime(e.target.value)}
+                  className='w-full p-3 rounded-lg text-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--color-text)',
+                    border: '2px solid var(--color-background-accent)',
+                  }}
+                />
+                {editScheduledTime && (
+                  <button
+                    onClick={() => setEditScheduledTime('')}
+                    className='mt-2 text-sm underline'
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    Quitar hora programada (ASAP)
+                  </button>
+                )}
+              </div>
+
+              {/* Items */}
+              <div className='space-y-4'>
+                {editModalItems.length === 0 ? (
+                  <div
+                    className='text-center py-8 opacity-60'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    No hay productos en este pedido
+                  </div>
+                ) : (
+                  editModalItems.map((item, index) => {
+                    const removableIngredients =
+                      getRemovableIngredientsForProduct(item.product_name);
+                    return (
+                      <div
+                        key={index}
+                        className='p-4 rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background-secondary)',
+                        }}
+                      >
+                        <div className='flex items-center justify-between mb-3'>
+                          <div>
+                            <span
+                              className='font-bold text-lg'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {item.product_name}
+                            </span>
+                            <span
+                              className='ml-2 opacity-60'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {formatPrice(item.product_price)} c/u
+                            </span>
+                          </div>
+                          <div className='flex items-center gap-3'>
+                            <button
+                              onClick={() => updateEditItemQuantity(index, -1)}
+                              className='w-10 h-10 rounded-lg font-bold text-xl flex items-center justify-center'
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                color: 'var(--color-on-primary)',
+                              }}
+                            >
+                              -
+                            </button>
+                            <span
+                              className='text-xl font-bold w-8 text-center'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => updateEditItemQuantity(index, 1)}
+                              className='w-10 h-10 rounded-lg font-bold text-xl flex items-center justify-center'
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                color: 'var(--color-on-primary)',
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Show removed ingredients and customize button */}
+                        <div className='mt-3 pt-3 border-t border-opacity-20 flex items-center justify-between'>
+                          <div className='flex-1'>
+                            {item.removed_ingredients &&
+                            item.removed_ingredients.length > 0 ? (
+                              <div
+                                className='text-sm italic'
+                                style={{ color: 'var(--color-primary)' }}
+                              >
+                                Sin: {item.removed_ingredients.join(', ')}
+                              </div>
+                            ) : (
+                              <div
+                                className='text-sm opacity-50'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                Sin modificaciones
+                              </div>
+                            )}
+                          </div>
+                          {removableIngredients.length > 0 && (
+                            <button
+                              onClick={() => openEditIngredientModal(index)}
+                              className='px-3 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1'
+                              style={{
+                                backgroundColor: 'var(--color-accent)',
+                                color: 'var(--color-on-accent)',
+                              }}
+                            >
+                              <Beef size={14} />
+                              Personalizar
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Subtotal */}
+                        <div
+                          className='mt-3 text-right font-bold'
+                          style={{ color: 'var(--color-accent)' }}
+                        >
+                          {formatPrice(item.product_price * item.quantity)}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className='px-6 py-4 border-t shrink-0'
+              style={{
+                borderColor: 'var(--color-background-accent)',
+                backgroundColor: 'var(--color-background-secondary)',
+              }}
+            >
+              <div className='flex items-center justify-between mb-4'>
+                <span
+                  className='text-lg font-semibold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Total
+                </span>
+                <span
+                  className='text-2xl font-bold'
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {formatPrice(
+                    editModalItems.reduce(
+                      (sum, item) => sum + item.product_price * item.quantity,
+                      0
+                    )
+                  )}
+                </span>
+              </div>
+              <div className='flex gap-3'>
+                <button
+                  onClick={closeEditModal}
+                  className='flex-1 py-4 rounded-lg font-bold text-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={saveOrderEdit}
+                  disabled={editModalItems.length === 0}
+                  className='flex-1 py-4 rounded-lg font-bold text-lg disabled:opacity-50'
+                  style={{
+                    backgroundColor: 'var(--color-accent)',
+                    color: 'var(--color-on-accent)',
+                  }}
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </div>
+
+            {/* Ingredient Sub-Modal */}
+            {editIngredientItemIndex !== null && (
+              <div className='absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-10'>
+                <div
+                  className='w-full max-w-md rounded-xl shadow-2xl overflow-hidden mx-4'
+                  style={{
+                    backgroundColor: 'var(--color-background-secondary)',
+                  }}
+                >
+                  <div
+                    className='px-6 py-4 flex items-center justify-between border-b'
+                    style={{ borderColor: 'var(--color-background-accent)' }}
+                  >
+                    <h3
+                      className='text-xl font-bold'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {editModalItems[editIngredientItemIndex]?.product_name}
+                    </h3>
+                    <button
+                      onClick={cancelEditIngredients}
+                      className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                      }}
+                    >
+                      <X size={20} style={{ color: 'var(--color-text)' }} />
+                    </button>
+                  </div>
+
+                  <div className='p-6'>
+                    <p
+                      className='text-sm mb-4 opacity-70'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Selecciona los ingredientes a quitar:
+                    </p>
+
+                    <div className='space-y-3 mb-6'>
+                      {editIngredientsList.map((ingredient) => (
+                        <button
+                          key={ingredient.name}
+                          onClick={() => toggleEditIngredient(ingredient.name)}
+                          className='w-full flex items-center justify-between p-3 rounded-lg transition-all'
+                          style={{
+                            backgroundColor: ingredient.removed
+                              ? 'var(--color-primary)'
+                              : 'var(--color-background)',
+                            color: ingredient.removed
+                              ? 'var(--color-on-primary)'
+                              : 'var(--color-text)',
+                          }}
+                        >
+                          <span
+                            className={ingredient.removed ? 'line-through' : ''}
+                          >
+                            {ingredient.name}
+                          </span>
+                          {ingredient.removed && (
+                            <span className='text-sm font-semibold'>SIN</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className='flex gap-3'>
+                      <button
+                        onClick={cancelEditIngredients}
+                        className='flex-1 py-3 rounded-lg font-bold'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={confirmEditIngredients}
+                        className='flex-1 py-3 rounded-lg font-bold'
+                        style={{
+                          backgroundColor: 'var(--color-accent)',
+                          color: 'var(--color-on-accent)',
+                        }}
+                      >
+                        Confirmar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
