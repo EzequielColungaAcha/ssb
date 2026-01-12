@@ -3253,122 +3253,147 @@ export function POSView() {
                             );
                           });
 
-                          // Render standalone items
-                          standaloneItems.forEach(
-                            ({ item, originalIndex }, idx) => {
-                              const removableIngredients =
-                                getRemovableIngredientsForProduct(
-                                  item.product_name
-                                );
-                              const isEditingThis =
-                                kdsEditingIngredients?.orderId === order.id &&
-                                kdsEditingIngredients?.itemIndex ===
-                                  originalIndex;
+                          // Group standalone items by signature
+                          type StandaloneGroup = {
+                            items: {
+                              item: KDSOrderItem;
+                              originalIndex: number;
+                            }[];
+                            count: number;
+                          };
+                          const standaloneGroups = new Map<
+                            string,
+                            StandaloneGroup
+                          >();
 
-                              elements.push(
-                                <div
-                                  key={`standalone-${idx}`}
-                                  className='text-sm rounded-lg p-2'
-                                  style={{
-                                    color: 'var(--color-text)',
-                                    backgroundColor: isEditingThis
-                                      ? 'var(--color-background-accent)'
-                                      : 'transparent',
-                                  }}
-                                >
-                                  <div className='flex justify-between items-center'>
-                                    <span>
-                                      {item.quantity}x {item.product_name}
+                          standaloneItems.forEach(({ item, originalIndex }) => {
+                            const signature = getItemSignature(item);
+                            const existing = standaloneGroups.get(signature);
+                            if (existing) {
+                              existing.items.push({ item, originalIndex });
+                              existing.count += item.quantity;
+                            } else {
+                              standaloneGroups.set(signature, {
+                                items: [{ item, originalIndex }],
+                                count: item.quantity,
+                              });
+                            }
+                          });
+
+                          // Render grouped standalone items
+                          let standaloneIdx = 0;
+                          standaloneGroups.forEach(({ items, count }) => {
+                            // Use first item for display, but track all indices
+                            const { item, originalIndex } = items[0];
+                            const removableIngredients =
+                              getRemovableIngredientsForProduct(
+                                item.product_name
+                              );
+                            const isEditingThis =
+                              kdsEditingIngredients?.orderId === order.id &&
+                              kdsEditingIngredients?.itemIndex ===
+                                originalIndex;
+
+                            elements.push(
+                              <div
+                                key={`standalone-${standaloneIdx++}`}
+                                className='text-sm rounded-lg p-2'
+                                style={{
+                                  color: 'var(--color-text)',
+                                  backgroundColor: isEditingThis
+                                    ? 'var(--color-background-accent)'
+                                    : 'transparent',
+                                }}
+                              >
+                                <div className='flex justify-between items-center'>
+                                  <span>
+                                    {count}x {item.product_name}
+                                  </span>
+                                  <div className='flex items-center gap-2'>
+                                    <span className='opacity-60'>
+                                      {formatPrice(item.product_price * count)}
                                     </span>
-                                    <div className='flex items-center gap-2'>
-                                      <span className='opacity-60'>
-                                        {formatPrice(
-                                          item.product_price * item.quantity
-                                        )}
-                                      </span>
-                                      {removableIngredients.length > 0 && (
-                                        <button
-                                          onClick={() =>
-                                            setKdsEditingIngredients(
-                                              isEditingThis
-                                                ? null
-                                                : {
-                                                    orderId: order.id,
-                                                    itemIndex: originalIndex,
-                                                  }
-                                            )
-                                          }
-                                          className='p-1 rounded hover:opacity-80'
-                                          style={{
-                                            backgroundColor: isEditingThis
-                                              ? 'var(--color-accent)'
-                                              : 'var(--color-background-accent)',
-                                            color: isEditingThis
-                                              ? 'var(--color-on-accent)'
-                                              : 'var(--color-text)',
-                                          }}
-                                          title='Editar ingredientes'
-                                        >
-                                          <Beef size={12} />
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {item.removed_ingredients &&
-                                    item.removed_ingredients.length > 0 && (
-                                      <div
-                                        className='text-xs italic ml-4'
+                                    {removableIngredients.length > 0 && (
+                                      <button
+                                        onClick={() =>
+                                          setKdsEditingIngredients(
+                                            isEditingThis
+                                              ? null
+                                              : {
+                                                  orderId: order.id,
+                                                  itemIndex: originalIndex,
+                                                }
+                                          )
+                                        }
+                                        className='p-1 rounded hover:opacity-80'
                                         style={{
-                                          color: 'var(--color-primary)',
+                                          backgroundColor: isEditingThis
+                                            ? 'var(--color-accent)'
+                                            : 'var(--color-background-accent)',
+                                          color: isEditingThis
+                                            ? 'var(--color-on-accent)'
+                                            : 'var(--color-text)',
                                         }}
+                                        title='Editar ingredientes'
                                       >
-                                        Sin:{' '}
-                                        {item.removed_ingredients.join(', ')}
-                                      </div>
+                                        <Beef size={12} />
+                                      </button>
                                     )}
+                                  </div>
+                                </div>
 
-                                  {/* Inline ingredient toggles */}
-                                  {isEditingThis && (
-                                    <div className='mt-2 flex flex-wrap gap-1'>
-                                      {removableIngredients.map((ing) => {
-                                        const isRemoved = (
-                                          item.removed_ingredients || []
-                                        ).includes(ing);
-                                        return (
-                                          <button
-                                            key={ing}
-                                            onClick={() =>
-                                              toggleKdsOrderIngredient(
-                                                order.id,
-                                                originalIndex,
-                                                ing
-                                              )
-                                            }
-                                            className='px-2 py-0.5 rounded text-xs font-medium transition-all'
-                                            style={{
-                                              backgroundColor: isRemoved
-                                                ? 'var(--color-primary)'
-                                                : 'var(--color-background)',
-                                              color: isRemoved
-                                                ? 'var(--color-on-primary)'
-                                                : 'var(--color-text)',
-                                              textDecoration: isRemoved
-                                                ? 'line-through'
-                                                : 'none',
-                                            }}
-                                          >
-                                            {isRemoved ? 'SIN ' : ''}
-                                            {ing}
-                                          </button>
-                                        );
-                                      })}
+                                {item.removed_ingredients &&
+                                  item.removed_ingredients.length > 0 && (
+                                    <div
+                                      className='text-xs italic ml-4'
+                                      style={{
+                                        color: 'var(--color-primary)',
+                                      }}
+                                    >
+                                      Sin: {item.removed_ingredients.join(', ')}
                                     </div>
                                   )}
-                                </div>
-                              );
-                            }
-                          );
+
+                                {/* Inline ingredient toggles */}
+                                {isEditingThis && (
+                                  <div className='mt-2 flex flex-wrap gap-1'>
+                                    {removableIngredients.map((ing) => {
+                                      const isRemoved = (
+                                        item.removed_ingredients || []
+                                      ).includes(ing);
+                                      return (
+                                        <button
+                                          key={ing}
+                                          onClick={() =>
+                                            toggleKdsOrderIngredient(
+                                              order.id,
+                                              originalIndex,
+                                              ing
+                                            )
+                                          }
+                                          className='px-2 py-0.5 rounded text-xs font-medium transition-all'
+                                          style={{
+                                            backgroundColor: isRemoved
+                                              ? 'var(--color-primary)'
+                                              : 'var(--color-background)',
+                                            color: isRemoved
+                                              ? 'var(--color-on-primary)'
+                                              : 'var(--color-text)',
+                                            textDecoration: isRemoved
+                                              ? 'line-through'
+                                              : 'none',
+                                          }}
+                                        >
+                                          {isRemoved ? 'SIN ' : ''}
+                                          {ing}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
 
                           return elements;
                         })()}
