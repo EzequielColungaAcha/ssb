@@ -1,5 +1,5 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 export interface MateriaPrima {
   id: string;
@@ -39,12 +39,16 @@ export interface Sale {
   id: string;
   sale_number: string;
   total_amount: number;
-  payment_method: 'cash' | 'online';
+  payment_method: 'cash' | 'online' | 'card' | 'on_delivery';
   cash_received?: number;
   change_given?: number;
   bills_received?: Record<string, number>;
   bills_change?: Record<string, number>;
   scheduled_time?: string; // ISO timestamp for when order should be ready
+  customer_name?: string;
+  order_type?: 'pickup' | 'delivery';
+  delivery_address?: string;
+  delivered_at?: string; // ISO timestamp when delivery was completed
   completed_at: string;
   created_at: string;
 }
@@ -58,6 +62,8 @@ export interface SaleItem {
   production_cost: number;
   quantity: number;
   subtotal: number;
+  removed_ingredients?: string[];
+  combo_name?: string;
   created_at: string;
 }
 

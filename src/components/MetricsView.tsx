@@ -6,10 +6,12 @@ import {
   Package,
   Filter,
   BarChart3,
+  Clock,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
+import { useCombo } from '../hooks/useCombo';
 import { db, SaleItem, ProductMateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
@@ -25,6 +27,13 @@ export function MetricsView() {
   const { sales } = useSales();
   const { products } = useProducts();
   const { materiaPrima, calculateAvailableStock } = useMateriaPrima();
+  const { combos } = useCombo();
+
+  // Create a Set of combo names for efficient lookup (memoized to prevent re-renders)
+  const comboNames = React.useMemo(
+    () => new Set(combos.map((c) => c.name)),
+    [combos]
+  );
   const [topProducts, setTopProducts] = useState<ProductSales[]>([]);
   const [allSoldProducts, setAllSoldProducts] = useState<ProductSales[]>([]);
   const [mostProfitableProducts, setMostProfitableProducts] = useState<
@@ -175,13 +184,18 @@ export function MetricsView() {
 
     setFilteredSaleItems(dateAndCategoryFilteredItems);
 
+    // Filter out items that are combos (match a combo name) for product stats
+    const itemsWithoutCombos = dateAndCategoryFilteredItems.filter(
+      (item: SaleItem) => !comboNames.has(item.product_name)
+    );
+
     const productSales: {
       [key: string]: { quantity: number; revenue: number; profit: number };
     } = {};
     let profit = 0;
     let revenue = 0;
 
-    dateAndCategoryFilteredItems.forEach((item: SaleItem) => {
+    itemsWithoutCombos.forEach((item: SaleItem) => {
       if (!productSales[item.product_name]) {
         productSales[item.product_name] = {
           quantity: 0,
@@ -225,7 +239,14 @@ export function MetricsView() {
     setTopProducts(topProductsData);
     setAllSoldProducts(allSoldProductsData);
     setMostProfitableProducts(mostProfitableData);
-  }, [categoryFilter, filterSalesByDate, productFilter, products, sales]);
+  }, [
+    categoryFilter,
+    filterSalesByDate,
+    productFilter,
+    products,
+    sales,
+    comboNames,
+  ]);
   const filteredProducts =
     categoryFilter === 'all'
       ? products
@@ -239,6 +260,58 @@ export function MetricsView() {
   const totalRevenue = filteredRevenue;
   const totalSales = filteredSalesState.length;
   const averageSale = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+  // Calculate delivery time metrics
+  const deliveryMetrics = (() => {
+    const deliverySales = filteredSalesState.filter(
+      (sale) =>
+        sale.order_type === 'delivery' &&
+        sale.scheduled_time &&
+        sale.delivered_at
+    );
+
+    if (deliverySales.length === 0) {
+      return {
+        count: 0,
+        averageDelay: 0,
+        onTimeCount: 0,
+        lateCount: 0,
+        earlyCount: 0,
+        onTimePercentage: 0,
+      };
+    }
+
+    let totalDelayMinutes = 0;
+    let onTimeCount = 0;
+    let lateCount = 0;
+    let earlyCount = 0;
+
+    deliverySales.forEach((sale) => {
+      const scheduled = new Date(sale.scheduled_time!).getTime();
+      const delivered = new Date(sale.delivered_at!).getTime();
+      const diffMinutes = (delivered - scheduled) / (1000 * 60);
+
+      totalDelayMinutes += diffMinutes;
+
+      // Consider "on time" if within 5 minutes
+      if (Math.abs(diffMinutes) <= 5) {
+        onTimeCount++;
+      } else if (diffMinutes > 5) {
+        lateCount++;
+      } else {
+        earlyCount++;
+      }
+    });
+
+    return {
+      count: deliverySales.length,
+      averageDelay: totalDelayMinutes / deliverySales.length,
+      onTimeCount,
+      lateCount,
+      earlyCount,
+      onTimePercentage: (onTimeCount / deliverySales.length) * 100,
+    };
+  })();
 
   const productsWithoutRawMaterials = inventoryFilteredProducts.filter(
     (p) => !p.uses_materia_prima
@@ -477,19 +550,22 @@ export function MetricsView() {
         </div>
       </div>
 
-      <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6'>
+      <div className='grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6'>
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-4'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex items-center justify-between mb-2'>
-            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
               Ingresos Totales
             </div>
-            <DollarSign size={24} style={{ color: 'var(--color-primary)' }} />
+            <DollarSign size={18} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div
-            className='text-3xl font-bold'
+            className='text-xl font-bold'
             style={{ color: 'var(--color-text)' }}
           >
             {formatPrice(totalRevenue)}
@@ -497,17 +573,20 @@ export function MetricsView() {
         </div>
 
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-4'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex items-center justify-between mb-2'>
-            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
               Ventas Totales
             </div>
-            <ShoppingCart size={24} style={{ color: 'var(--color-primary)' }} />
+            <ShoppingCart size={18} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div
-            className='text-3xl font-bold'
+            className='text-xl font-bold'
             style={{ color: 'var(--color-text)' }}
           >
             {totalSales}
@@ -515,17 +594,20 @@ export function MetricsView() {
         </div>
 
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-4'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex items-center justify-between mb-2'>
-            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
               Venta Promedio
             </div>
-            <TrendingUp size={24} style={{ color: 'var(--color-primary)' }} />
+            <TrendingUp size={18} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div
-            className='text-3xl font-bold'
+            className='text-xl font-bold'
             style={{ color: 'var(--color-text)' }}
           >
             {formatPrice(averageSale)}
@@ -533,17 +615,20 @@ export function MetricsView() {
         </div>
 
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-4'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex items-center justify-between mb-2'>
-            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
               Ganancia Total
             </div>
-            <TrendingUp size={24} style={{ color: 'var(--color-primary)' }} />
+            <TrendingUp size={18} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div
-            className='text-3xl font-bold'
+            className='text-xl font-bold'
             style={{ color: 'var(--color-text)' }}
           >
             {formatPrice(totalProfit)}
@@ -551,21 +636,78 @@ export function MetricsView() {
         </div>
 
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-4'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex items-center justify-between mb-2'>
-            <div className='opacity-60' style={{ color: 'var(--color-text)' }}>
-              Valor del Inventario
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
+              Valor Inventario
             </div>
-            <Package size={24} style={{ color: 'var(--color-primary)' }} />
+            <Package size={18} style={{ color: 'var(--color-primary)' }} />
           </div>
           <div
-            className='text-3xl font-bold'
+            className='text-xl font-bold'
             style={{ color: 'var(--color-text)' }}
           >
             {formatPrice(totalInventoryValue)}
           </div>
+        </div>
+
+        {/* Delivery Time Metric */}
+        <div
+          className='rounded-lg shadow-md p-4'
+          style={{ backgroundColor: 'var(--color-background-secondary)' }}
+        >
+          <div className='flex items-center justify-between mb-1'>
+            <div
+              className='opacity-60 text-xs'
+              style={{ color: 'var(--color-text)' }}
+            >
+              Tiempo Entrega
+            </div>
+            <Clock size={18} style={{ color: 'var(--color-primary)' }} />
+          </div>
+          {deliveryMetrics.count > 0 ? (
+            <div>
+              <div
+                className='text-xl font-bold'
+                style={{
+                  color:
+                    Math.abs(deliveryMetrics.averageDelay) <= 5
+                      ? '#10b981'
+                      : deliveryMetrics.averageDelay > 0
+                      ? '#ef4444'
+                      : '#3b82f6',
+                }}
+              >
+                {deliveryMetrics.averageDelay > 0 ? '+' : ''}
+                {Math.round(deliveryMetrics.averageDelay)} min
+              </div>
+              <div
+                className='text-xs space-y-0.5'
+                style={{ color: 'var(--color-text)', opacity: 0.7 }}
+              >
+                <div>
+                  A tiempo: {deliveryMetrics.onTimeCount} (
+                  {deliveryMetrics.onTimePercentage.toFixed(0)}%)
+                </div>
+                <div>
+                  Tarde: {deliveryMetrics.lateCount} | Temp:{' '}
+                  {deliveryMetrics.earlyCount}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div
+              className='text-sm'
+              style={{ color: 'var(--color-text)', opacity: 0.6 }}
+            >
+              Sin datos
+            </div>
+          )}
         </div>
       </div>
 

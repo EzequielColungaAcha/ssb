@@ -64,6 +64,7 @@ interface KDSOrderItem {
   quantity: number;
   product_price: number;
   removed_ingredients?: string[];
+  combo_name?: string;
 }
 
 interface KDSOrder {
@@ -71,21 +72,13 @@ interface KDSOrder {
   sale_number: string;
   items: KDSOrderItem[];
   total: number;
-  status: 'pending' | 'preparing' | 'completed';
+  status: 'pending' | 'preparing' | 'on_delivery' | 'completed';
   scheduled_time?: string;
   customer_name?: string;
   order_type?: 'pickup' | 'delivery';
+  delivery_address?: string;
   created_at: string;
   finished_at?: string;
-}
-
-interface SaleItem {
-  product_id: string;
-  product_name: string;
-  product_price: number;
-  production_cost: number;
-  quantity: number;
-  removedIngredients?: string[];
 }
 
 interface IngredientInfo {
@@ -331,7 +324,7 @@ function SortableCategory({
 
 export function POSView() {
   const { products, refresh: refreshProducts, updateProduct } = useProducts();
-  const { createSale, updateSale, getSaleById, getSaleItems } = useSales();
+  const { sales, createSale, updateSale } = useSales();
   const { calculateOptimalChange, processChange, processCashReceived } =
     useCashDrawer();
   const {
@@ -353,7 +346,9 @@ export function POSView() {
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<
+    'cash' | 'online' | 'card' | 'on_delivery'
+  >('cash');
   const [cashReceived, setCashReceived] = useState(0);
   const [changeBreakdown, setChangeBreakdown] = useState<
     ChangeBreakdown[] | null
@@ -370,10 +365,28 @@ export function POSView() {
   const [nextSaleNumber, setNextSaleNumber] = useState<number | null>(null);
   const [kdsEnabled, setKdsEnabled] = useState(false);
   const [kdsUrl, setKdsUrl] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showKdsPanel, setShowKdsPanel] = useState(false);
   const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
+  const [kdsConnectionStatus, setKdsConnectionStatus] = useState<
+    'disconnected' | 'connecting' | 'connected' | 'error'
+  >('disconnected');
   const kdsPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const kdsWsRef = useRef<WebSocket | null>(null);
+  const kdsWsReconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishedOrdersRef = useRef<Set<string>>(new Set());
+
+  // KDS inline ingredient editing state
+  const [kdsEditingIngredients, setKdsEditingIngredients] = useState<{
+    orderId: string;
+    itemIndex: number;
+  } | null>(null);
+
+  // KDS address editing state
+  const [kdsEditingAddress, setKdsEditingAddress] = useState<string | null>(
+    null
+  );
+  const [kdsAddressValue, setKdsAddressValue] = useState('');
 
   // Ingredient customization modal state
   const [showIngredientModal, setShowIngredientModal] = useState(false);
@@ -397,6 +410,7 @@ export function POSView() {
   // Customer info for order
   const [customerName, setCustomerName] = useState<string>('');
   const [orderType, setOrderType] = useState<'pickup' | 'delivery'>('pickup');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
 
   // Editing order state
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -430,6 +444,10 @@ export function POSView() {
     setProductsWithRemovableIngredients,
   ] = useState<Set<string>>(new Set());
 
+  // Map product name to its removable ingredients
+  const [productRemovableIngredients, setProductRemovableIngredients] =
+    useState<Record<string, string[]>>({});
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -459,6 +477,12 @@ export function POSView() {
         }
         setKdsEnabled(settings.kds_enabled || false);
         setKdsUrl(settings.kds_url || '');
+        console.log('KDS Settings loaded:', {
+          kdsEnabled: settings.kds_enabled,
+          kdsUrl: settings.kds_url,
+        });
+      } else {
+        console.log('KDS Settings: no settings found in IndexedDB');
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -855,11 +879,20 @@ export function POSView() {
 
   const sendToKDS = async (
     saleNumber: string,
-    items: SaleItem[],
+    items: Array<{
+      product_id: string;
+      product_name: string;
+      product_price: number;
+      production_cost: number;
+      quantity: number;
+      removedIngredients: string[];
+      combo_name?: string;
+    }>,
     total: number,
     scheduledTimeISO?: string,
     customerNameParam?: string,
-    orderTypeParam?: 'pickup' | 'delivery'
+    orderTypeParam?: 'pickup' | 'delivery',
+    deliveryAddressParam?: string
   ) => {
     try {
       await db.init();
@@ -881,12 +914,15 @@ export function POSView() {
             quantity: item.quantity,
             product_price: item.product_price,
             removed_ingredients: item.removedIngredients || [],
+            combo_name: item.combo_name || null,
           })),
           total,
           payment_method: paymentMethod,
           scheduled_time: scheduledTimeISO,
           customer_name: customerNameParam || null,
           order_type: orderTypeParam || null,
+          delivery_address:
+            orderTypeParam === 'delivery' ? deliveryAddressParam || null : null,
         }),
       });
 
@@ -899,14 +935,26 @@ export function POSView() {
   };
 
   const fetchKdsOrders = useCallback(async () => {
-    if (!kdsEnabled || !kdsUrl) return;
+    if (!kdsEnabled || !kdsUrl) {
+      console.log('fetchKdsOrders: skipped (disabled or no URL)', {
+        kdsEnabled,
+        kdsUrl,
+      });
+      return;
+    }
+
+    console.log('fetchKdsOrders: fetching from', kdsUrl);
 
     try {
-      const response = await fetch(`${kdsUrl}/api/orders?status=pending`);
+      // Fetch pending and on_delivery orders
+      const response = await fetch(
+        `${kdsUrl}/api/orders?status=pending,on_delivery`
+      );
       if (response.ok) {
         const data = await response.json();
         const orders: KDSOrder[] = (data.orders || []).filter(
-          (order: KDSOrder) => order.status === 'pending'
+          (order: KDSOrder) =>
+            order.status === 'pending' || order.status === 'on_delivery'
         );
 
         // Check for newly completed orders
@@ -924,52 +972,167 @@ export function POSView() {
           }
         });
 
-        // Sort orders by scheduled_time
-        // 1. Past scheduled time (overdue) first
-        // 2. Upcoming scheduled time (soonest first)
-        // 3. No scheduled time (ASAP) at the end
-        const now = new Date().getTime();
+        // Sort orders:
+        // 1. Orders without scheduled time first (sorted by created_at)
+        // 2. Orders with scheduled time (sorted by scheduled_time)
         const sortedOrders = [...orders].sort((a, b) => {
-          const aTime = a.scheduled_time
-            ? new Date(a.scheduled_time).getTime()
-            : null;
-          const bTime = b.scheduled_time
-            ? new Date(b.scheduled_time).getTime()
-            : null;
+          const aHasTime = !!a.scheduled_time;
+          const bHasTime = !!b.scheduled_time;
 
-          // If both have no scheduled time, sort by created_at
-          if (aTime === null && bTime === null) {
+          // No time first
+          if (!aHasTime && bHasTime) return -1;
+          if (aHasTime && !bHasTime) return 1;
+
+          // Both have no time - sort by created_at
+          if (!aHasTime && !bHasTime) {
             return (
               new Date(a.created_at).getTime() -
               new Date(b.created_at).getTime()
             );
           }
 
-          // Orders without scheduled time go last
-          if (aTime === null) return 1;
-          if (bTime === null) return -1;
-
-          // Both have scheduled times - overdue orders first, then soonest
-          const aOverdue = aTime < now;
-          const bOverdue = bTime < now;
-
-          if (aOverdue && !bOverdue) return -1;
-          if (!aOverdue && bOverdue) return 1;
-
-          // Both overdue or both not overdue - sort by time
-          return aTime - bTime;
+          // Both have time - sort by scheduled_time
+          return (
+            new Date(a.scheduled_time!).getTime() -
+            new Date(b.scheduled_time!).getTime()
+          );
         });
 
         setKdsOrders(sortedOrders);
+        console.log('fetchKdsOrders: received', sortedOrders.length, 'orders');
+      } else {
+        console.error(
+          'fetchKdsOrders: request failed',
+          response.status,
+          response.statusText
+        );
+        toast.error(`Error al cargar pedidos: ${response.status}`);
       }
     } catch (error) {
       console.error('Error fetching KDS orders:', error);
+      toast.error('Error de conexión con KDS');
     }
   }, [kdsEnabled, kdsUrl]);
 
+  // WebSocket connection for real-time KDS updates
+  const connectKdsWebSocket = useCallback(() => {
+    if (!kdsEnabled || !kdsUrl) {
+      console.log('KDS WebSocket: disabled or no URL', { kdsEnabled, kdsUrl });
+      return;
+    }
+
+    // Close existing connection if any
+    if (kdsWsRef.current) {
+      kdsWsRef.current.close();
+    }
+
+    // Convert HTTP URL to WebSocket URL
+    const wsUrl = kdsUrl.replace(/^http/, 'ws');
+    console.log('KDS WebSocket: connecting to', wsUrl);
+    setKdsConnectionStatus('connecting');
+
+    try {
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('KDS WebSocket connected');
+        setKdsConnectionStatus('connected');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'new_order') {
+            // Add new order if it's pending or on_delivery
+            if (
+              data.order.status === 'pending' ||
+              data.order.status === 'on_delivery'
+            ) {
+              setKdsOrders((prev) => {
+                // Avoid duplicates
+                if (prev.some((o) => o.id === data.order.id)) {
+                  return prev;
+                }
+                const newOrders = [data.order, ...prev];
+                // Sort orders
+                return newOrders.sort((a, b) => {
+                  const aHasTime = !!a.scheduled_time;
+                  const bHasTime = !!b.scheduled_time;
+                  if (!aHasTime && bHasTime) return -1;
+                  if (aHasTime && !bHasTime) return 1;
+                  if (!aHasTime && !bHasTime) {
+                    return (
+                      new Date(a.created_at).getTime() -
+                      new Date(b.created_at).getTime()
+                    );
+                  }
+                  return (
+                    new Date(a.scheduled_time!).getTime() -
+                    new Date(b.scheduled_time!).getTime()
+                  );
+                });
+              });
+            }
+          } else if (data.type === 'order_updated') {
+            // Update order status
+            setKdsOrders((prev) => {
+              if (data.status === 'completed') {
+                // Remove completed orders after brief delay
+                setTimeout(() => {
+                  setKdsOrders((p) => p.filter((o) => o.id !== data.orderId));
+                }, 500);
+              }
+              return prev.map((order) =>
+                order.id === data.orderId
+                  ? { ...order, status: data.status }
+                  : order
+              );
+            });
+          } else if (data.type === 'order_full_update') {
+            // Full order update (items, scheduled_time, etc.)
+            setKdsOrders((prev) =>
+              prev.map((order) =>
+                order.id === data.order.id ? data.order : order
+              )
+            );
+          } else if (data.type === 'order_deleted') {
+            // Remove deleted order
+            setKdsOrders((prev) =>
+              prev.filter((order) => order.id !== data.orderId)
+            );
+          }
+        } catch (error) {
+          console.error('Error parsing KDS WebSocket message:', error);
+        }
+      };
+
+      ws.onclose = () => {
+        console.log('KDS WebSocket disconnected');
+        kdsWsRef.current = null;
+        setKdsConnectionStatus('disconnected');
+        // Attempt to reconnect after 3 seconds if panel is still open
+        if (showKdsPanel) {
+          kdsWsReconnectRef.current = setTimeout(() => {
+            connectKdsWebSocket();
+          }, 3000);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('KDS WebSocket error:', error);
+        setKdsConnectionStatus('error');
+      };
+
+      kdsWsRef.current = ws;
+    } catch (error) {
+      console.error('Error creating KDS WebSocket:', error);
+    }
+  }, [kdsEnabled, kdsUrl, showKdsPanel]);
+
   const updateKdsOrderStatus = async (
     orderId: string,
-    status: 'pending' | 'preparing' | 'completed'
+    status: 'pending' | 'preparing' | 'on_delivery' | 'completed'
   ) => {
     if (!kdsUrl) return;
 
@@ -983,6 +1146,9 @@ export function POSView() {
       });
 
       if (response.ok) {
+        // Find the KDS order to get sale_number and order_type
+        const kdsOrder = kdsOrders.find((o) => o.id === orderId);
+
         if (status === 'completed') {
           finishedOrdersRef.current.add(orderId);
           // Auto-remove after 2 seconds
@@ -990,6 +1156,24 @@ export function POSView() {
             setKdsOrders((prev) => prev.filter((o) => o.id !== orderId));
             finishedOrdersRef.current.delete(orderId);
           }, 2000);
+
+          // If this is a delivery order, update the local Sale with delivered_at
+          if (kdsOrder && kdsOrder.order_type === 'delivery') {
+            try {
+              // Find the sale by sale_number
+              const allSales = sales;
+              const matchingSale = allSales.find(
+                (s) => s.sale_number === kdsOrder.sale_number
+              );
+              if (matchingSale) {
+                await updateSale(matchingSale.id, {
+                  delivered_at: new Date().toISOString(),
+                });
+              }
+            } catch (error) {
+              console.error('Error updating sale delivered_at:', error);
+            }
+          }
         }
         // Update local state immediately
         setKdsOrders((prev) =>
@@ -1010,6 +1194,95 @@ export function POSView() {
     } catch (error) {
       console.error('Error updating KDS order status:', error);
       toast.error('Error al actualizar el estado del pedido');
+    }
+  };
+
+  // Toggle ingredient for a KDS order item inline
+  const toggleKdsOrderIngredient = async (
+    orderId: string,
+    itemIndex: number,
+    ingredientName: string
+  ) => {
+    if (!kdsUrl) return;
+
+    const order = kdsOrders.find((o) => o.id === orderId);
+    if (!order) return;
+
+    const item = order.items[itemIndex];
+    if (!item) return;
+
+    const currentRemoved = item.removed_ingredients || [];
+    const newRemoved = currentRemoved.includes(ingredientName)
+      ? currentRemoved.filter((i) => i !== ingredientName)
+      : [...currentRemoved, ingredientName];
+
+    // Update locally first for immediate feedback
+    const newItems = [...order.items];
+    newItems[itemIndex] = { ...item, removed_ingredients: newRemoved };
+
+    setKdsOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, items: newItems } : o))
+    );
+
+    try {
+      const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: newItems,
+          total: order.total,
+        }),
+      });
+
+      if (!response.ok) {
+        // Revert on failure
+        setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+        toast.error('Error al actualizar ingredientes');
+      }
+    } catch (error) {
+      // Revert on error
+      setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+      console.error('Error updating KDS order ingredients:', error);
+      toast.error('Error al actualizar ingredientes');
+    }
+  };
+
+  // Update KDS order address
+  const updateKdsOrderAddress = async (orderId: string, newAddress: string) => {
+    if (!kdsUrl) return;
+
+    const order = kdsOrders.find((o) => o.id === orderId);
+    if (!order) return;
+
+    // Update locally first for immediate feedback
+    setKdsOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId ? { ...o, delivery_address: newAddress } : o
+      )
+    );
+
+    try {
+      const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_address: newAddress,
+        }),
+      });
+
+      if (!response.ok) {
+        // Revert on failure
+        setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+        toast.error('Error al actualizar dirección');
+      } else {
+        toast.success('Dirección actualizada');
+        setKdsEditingAddress(null);
+      }
+    } catch (error) {
+      // Revert on error
+      setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+      console.error('Error updating KDS order address:', error);
+      toast.error('Error al actualizar dirección');
     }
   };
 
@@ -1125,19 +1398,7 @@ export function POSView() {
 
   // Get available ingredients for a product by name (for edit modal)
   const getRemovableIngredientsForProduct = (productName: string): string[] => {
-    const product = products.find((p) => p.name === productName);
-    if (!product?.materia_prima?.length) return [];
-
-    const removable: string[] = [];
-    for (const mp of product.materia_prima) {
-      if (mp.removable) {
-        const mpData = materiaPrima.find((m) => m.id === mp.materia_prima_id);
-        if (mpData) {
-          removable.push(mpData.name);
-        }
-      }
-    }
-    return removable;
+    return productRemovableIngredients[productName] || [];
   };
 
   // Open ingredient sub-modal for an item in the edit modal
@@ -1203,6 +1464,7 @@ export function POSView() {
     setScheduledTime('');
     setCustomerName('');
     setOrderType('pickup');
+    setDeliveryAddress('');
     setCashReceived(0);
     setChangeBreakdown(null);
     setBillHistory([]);
@@ -1225,14 +1487,45 @@ export function POSView() {
 
     setProcessing(true);
     try {
-      const items = cart.map((item) => ({
-        product_id: item.id,
-        product_name: item.name,
-        product_price: item.price,
-        production_cost: item.production_cost,
-        quantity: item.quantity,
-        removedIngredients: item.removedIngredients,
-      }));
+      // Build items array, expanding combos into individual products
+      const items: {
+        product_id: string;
+        product_name: string;
+        product_price: number;
+        production_cost: number;
+        quantity: number;
+        removedIngredients: string[];
+        combo_name?: string;
+      }[] = [];
+
+      for (const cartItem of cart) {
+        if (cartItem.isCombo && cartItem.comboSelections) {
+          // Expand combo into individual products for each quantity
+          for (let q = 0; q < cartItem.quantity; q++) {
+            for (const selection of cartItem.comboSelections) {
+              items.push({
+                product_id: selection.productId,
+                product_name: selection.productName,
+                product_price: selection.productPrice,
+                production_cost: 0,
+                quantity: 1,
+                removedIngredients: selection.removedIngredients || [],
+                combo_name: cartItem.comboName,
+              });
+            }
+          }
+        } else {
+          // Regular product
+          items.push({
+            product_id: cartItem.id,
+            product_name: cartItem.name,
+            product_price: cartItem.price,
+            production_cost: cartItem.production_cost,
+            quantity: cartItem.quantity,
+            removedIngredients: cartItem.removedIngredients || [],
+          });
+        }
+      }
 
       let billsChangeData: Record<number, number> | undefined;
 
@@ -1262,14 +1555,21 @@ export function POSView() {
         paymentMethod === 'cash' ? cashReceived : undefined,
         undefined,
         billsChangeData,
-        scheduledTimeISO
+        scheduledTimeISO,
+        customerName || undefined,
+        orderType,
+        orderType === 'delivery' ? deliveryAddress || undefined : undefined
       );
 
       const materiaPrimaItems = cart.filter((item) => item.uses_materia_prima);
 
       await Promise.all(
         materiaPrimaItems.map((item) =>
-          deductMateriaPrimaStock(item.id, item.quantity)
+          deductMateriaPrimaStock(
+            item.id,
+            item.quantity,
+            item.removedIngredients
+          )
         )
       );
 
@@ -1298,7 +1598,8 @@ export function POSView() {
           total,
           scheduledTimeISO,
           customerName || undefined,
-          orderType
+          orderType,
+          deliveryAddress || undefined
         );
         // Sync theme to KDS with each sale to ensure KDS has latest theme
         await syncThemeToKDS();
@@ -1323,6 +1624,7 @@ export function POSView() {
       setScheduledTime('');
       setCustomerName('');
       setOrderType('pickup');
+      setDeliveryAddress('');
       setNextSaleNumber((prev) => (prev !== null ? prev + 1 : prev));
 
       toast.success(
@@ -1346,7 +1648,12 @@ export function POSView() {
 
   const canComplete = () => {
     if (cart.length === 0) return false;
-    if (paymentMethod === 'online') return true;
+    if (
+      paymentMethod === 'online' ||
+      paymentMethod === 'card' ||
+      paymentMethod === 'on_delivery'
+    )
+      return true;
     if (paymentMethod === 'cash') {
       if (cashReceived < total) return false;
       if (change > 0 && !changeBreakdown) return false;
@@ -1562,38 +1869,72 @@ export function POSView() {
   useEffect(() => {
     const loadRemovableIngredients = async () => {
       const productsWithRemovable = new Set<string>();
+      const removableByName: Record<string, string[]> = {};
 
       for (const product of products) {
         if (product.uses_materia_prima) {
           const productMPs = await getProductMateriaPrima(product.id);
-          const hasRemovable = productMPs.some((mp) => mp.removable === true);
-          if (hasRemovable) {
+          const removableIngredients: string[] = [];
+
+          for (const mp of productMPs) {
+            if (mp.removable) {
+              const mpData = materiaPrima.find(
+                (m) => m.id === mp.materia_prima_id
+              );
+              if (mpData) {
+                removableIngredients.push(mpData.name);
+              }
+            }
+          }
+
+          if (removableIngredients.length > 0) {
             productsWithRemovable.add(product.id);
+            removableByName[product.name] = removableIngredients;
           }
         }
       }
 
       setProductsWithRemovableIngredients(productsWithRemovable);
+      setProductRemovableIngredients(removableByName);
     };
 
     loadRemovableIngredients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products]);
+  }, [products, materiaPrima]);
 
-  // KDS polling when panel is open
+  // KDS WebSocket and polling when panel is open
   useEffect(() => {
     if (showKdsPanel && kdsEnabled && kdsUrl) {
+      // Initial fetch
       fetchKdsOrders();
-      kdsPollingRef.current = setInterval(fetchKdsOrders, 3000);
+
+      // Connect WebSocket for real-time updates
+      connectKdsWebSocket();
+
+      // Keep polling as fallback (reduced frequency since we have WebSocket)
+      kdsPollingRef.current = setInterval(fetchKdsOrders, 10000);
     }
 
     return () => {
+      // Clean up polling
       if (kdsPollingRef.current) {
         clearInterval(kdsPollingRef.current);
         kdsPollingRef.current = null;
       }
+
+      // Clean up WebSocket
+      if (kdsWsRef.current) {
+        kdsWsRef.current.close();
+        kdsWsRef.current = null;
+      }
+
+      // Clean up reconnect timeout
+      if (kdsWsReconnectRef.current) {
+        clearTimeout(kdsWsReconnectRef.current);
+        kdsWsReconnectRef.current = null;
+      }
     };
-  }, [showKdsPanel, kdsEnabled, kdsUrl, fetchKdsOrders]);
+  }, [showKdsPanel, kdsEnabled, kdsUrl, fetchKdsOrders, connectKdsWebSocket]);
 
   return (
     <DndContext
@@ -1606,105 +1947,158 @@ export function POSView() {
         className='flex h-screen'
         style={{ backgroundColor: 'var(--color-background)' }}
       >
-        <div className='flex-1 p-6 overflow-auto scrollbar-hide relative'>
-          <div className='absolute top-2 right-2 z-20 flex items-center gap-2'>
-            {kdsEnabled && (
+        <div className='flex-1 overflow-auto scrollbar-hide relative'>
+          {/* Sticky Category Filter Bar */}
+          <div
+            className='sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-4'
+            style={{ backgroundColor: 'var(--color-background)' }}
+          >
+            {/* Category Tabs */}
+            <div className='flex gap-2 overflow-x-auto scrollbar-hide flex-1'>
+              <button
+                onClick={() => setSelectedCategory(null)}
+                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
+                style={{
+                  backgroundColor:
+                    selectedCategory === null
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background-secondary)',
+                  color:
+                    selectedCategory === null
+                      ? 'var(--color-on-accent)'
+                      : 'var(--color-text)',
+                }}
+              >
+                Todos
+              </button>
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all capitalize'
+                  style={{
+                    backgroundColor:
+                      selectedCategory === cat
+                        ? 'var(--color-accent)'
+                        : 'var(--color-background-secondary)',
+                    color:
+                      selectedCategory === cat
+                        ? 'var(--color-on-accent)'
+                        : 'var(--color-text)',
+                  }}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            {/* Action Buttons */}
+            <div className='flex items-center gap-2 shrink-0'>
+              {kdsEnabled && (
+                <button
+                  type='button'
+                  onClick={() => setShowKdsPanel(true)}
+                  className='p-2 transition-transform'
+                  aria-label='Ver pedidos KDS'
+                >
+                  <Eye size={20} style={{ color: 'var(--color-accent)' }} />
+                </button>
+              )}
               <button
                 type='button'
-                onClick={() => setShowKdsPanel(true)}
+                onClick={toggleLayoutLock}
                 className='p-2 transition-transform'
-                aria-label='Ver pedidos KDS'
+                aria-label={
+                  isLayoutLocked
+                    ? 'Desbloquear diseño del POS'
+                    : 'Bloquear diseño del POS'
+                }
               >
-                <Eye size={20} style={{ color: 'var(--color-accent)' }} />
+                {isLayoutLocked ? (
+                  <Lock size={20} style={{ color: 'var(--color-accent)' }} />
+                ) : (
+                  <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+                )}
               </button>
-            )}
-            <button
-              type='button'
-              onClick={toggleLayoutLock}
-              className='p-2 transition-transform'
-              aria-label={
-                isLayoutLocked
-                  ? 'Desbloquear diseño del POS'
-                  : 'Bloquear diseño del POS'
-              }
-            >
-              {isLayoutLocked ? (
-                <Lock size={20} style={{ color: 'var(--color-accent)' }} />
-              ) : (
-                <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
-              )}
-            </button>
+            </div>
           </div>
-          <SortableContext
-            items={categories.map((cat) => `category-${cat}`)}
-            disabled={isLayoutLocked}
-          >
-            {categories.map((category) => {
-              // Handle combos category specially
-              if (category === 'combos') {
-                const comboIds = sortedCombos.map((c) => `combo-${c.id}`);
-                return (
-                  <SortableCategory
-                    key='combos'
-                    category='combos'
-                    isLocked={isLayoutLocked}
-                  >
-                    <SortableContext
-                      items={comboIds}
-                      strategy={rectSortingStrategy}
-                      disabled={isLayoutLocked}
+
+          <div className='p-6 pt-0'>
+            <SortableContext
+              items={categories.map((cat) => `category-${cat}`)}
+              disabled={isLayoutLocked}
+            >
+              {categories
+                .filter(
+                  (cat) => selectedCategory === null || cat === selectedCategory
+                )
+                .map((category) => {
+                  // Handle combos category specially
+                  if (category === 'combos') {
+                    const comboIds = sortedCombos.map((c) => `combo-${c.id}`);
+                    return (
+                      <SortableCategory
+                        key='combos'
+                        category='combos'
+                        isLocked={isLayoutLocked}
+                      >
+                        <SortableContext
+                          items={comboIds}
+                          strategy={rectSortingStrategy}
+                          disabled={isLayoutLocked}
+                        >
+                          <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                            {sortedCombos.map((combo) => (
+                              <SortableComboItem
+                                key={combo.id}
+                                combo={combo}
+                                isLocked={isLayoutLocked}
+                                onOpenComboModal={openComboModal}
+                              />
+                            ))}
+                          </div>
+                        </SortableContext>
+                      </SortableCategory>
+                    );
+                  }
+
+                  const categoryProducts = activeProducts.filter(
+                    (p) => p.category === category
+                  );
+                  const categoryProductIds = categoryProducts.map((p) => p.id);
+
+                  return (
+                    <SortableCategory
+                      key={category}
+                      category={category}
+                      isLocked={isLayoutLocked}
                     >
-                      <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
-                        {sortedCombos.map((combo) => (
-                          <SortableComboItem
-                            key={combo.id}
-                            combo={combo}
-                            isLocked={isLayoutLocked}
-                            onOpenComboModal={openComboModal}
-                          />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  </SortableCategory>
-                );
-              }
-
-              const categoryProducts = activeProducts.filter(
-                (p) => p.category === category
-              );
-              const categoryProductIds = categoryProducts.map((p) => p.id);
-
-              return (
-                <SortableCategory
-                  key={category}
-                  category={category}
-                  isLocked={isLayoutLocked}
-                >
-                  <SortableContext
-                    items={categoryProductIds}
-                    strategy={rectSortingStrategy}
-                    disabled={isLayoutLocked}
-                  >
-                    <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
-                      {categoryProducts.map((product) => (
-                        <SortableProductItem
-                          key={product.id}
-                          product={product}
-                          isLocked={isLayoutLocked}
-                          onAddToCart={(p) => addToCart(p)}
-                          onLongPress={handleProductLongPress}
-                          getStock={getProductStock}
-                          hasRemovableIngredients={productsWithRemovableIngredients.has(
-                            product.id
-                          )}
-                        />
-                      ))}
-                    </div>
-                  </SortableContext>
-                </SortableCategory>
-              );
-            })}
-          </SortableContext>
+                      <SortableContext
+                        items={categoryProductIds}
+                        strategy={rectSortingStrategy}
+                        disabled={isLayoutLocked}
+                      >
+                        <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                          {categoryProducts.map((product) => (
+                            <SortableProductItem
+                              key={product.id}
+                              product={product}
+                              isLocked={isLayoutLocked}
+                              onAddToCart={(p) => addToCart(p)}
+                              onLongPress={handleProductLongPress}
+                              getStock={getProductStock}
+                              hasRemovableIngredients={productsWithRemovableIngredients.has(
+                                product.id
+                              )}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </SortableCategory>
+                  );
+                })}
+            </SortableContext>
+          </div>
         </div>
 
         <div
@@ -1761,6 +2155,7 @@ export function POSView() {
                       setScheduledTime('');
                       setCustomerName('');
                       setOrderType('pickup');
+                      setDeliveryAddress('');
                     }
                   }}
                   className='text-red-500 hover:text-red-700'
@@ -1898,105 +2293,145 @@ export function POSView() {
           </div>
 
           <div className='border-t pt-4'>
-            {/* Scheduled Time Picker */}
-            <div className='mb-4'>
-              <label
-                className='flex items-center gap-2 text-sm mb-2'
-                style={{ color: 'var(--color-text)' }}
-              >
-                <Clock size={16} />
-                <span>Hora programada (opcional)</span>
-              </label>
-              <input
-                type='time'
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-                className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
-                style={{
-                  backgroundColor: 'var(--color-background)',
-                  borderColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                }}
-              />
-              {scheduledTime && (
-                <button
-                  onClick={() => setScheduledTime('')}
-                  className='text-xs mt-1 hover:underline'
-                  style={{ color: 'var(--color-accent)' }}
-                >
-                  Limpiar hora
-                </button>
-              )}
-            </div>
+            {/* Pre-checkout: Time, Name, Order Type - only show before payment */}
+            {!showPayment && (
+              <>
+                {/* Scheduled Time Picker */}
+                <div className='mb-4'>
+                  <label
+                    className='flex items-center gap-2 text-sm mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Clock size={16} />
+                    <span>Hora programada (opcional)</span>
+                  </label>
+                  <input
+                    type='text'
+                    inputMode='numeric'
+                    placeholder='HH:MM (ej: 2030)'
+                    value={scheduledTime}
+                    onChange={(e) => {
+                      // Auto-format: only digits, add colon after 2 digits
+                      let val = e.target.value.replace(/[^0-9]/g, '');
+                      if (val.length > 4) val = val.slice(0, 4);
+                      if (val.length > 2) {
+                        val = val.slice(0, 2) + ':' + val.slice(2);
+                      }
+                      setScheduledTime(val);
+                    }}
+                    className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                    style={{
+                      backgroundColor: 'var(--color-background)',
+                      borderColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                  {scheduledTime && (
+                    <button
+                      onClick={() => setScheduledTime('')}
+                      className='text-xs mt-1 hover:underline'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      Limpiar hora
+                    </button>
+                  )}
+                </div>
 
-            {/* Customer Name */}
-            <div className='mb-4'>
-              <label
-                className='flex items-center gap-2 text-sm mb-2'
-                style={{ color: 'var(--color-text)' }}
-              >
-                <User size={16} />
-                <span>Nombre del cliente (opcional)</span>
-              </label>
-              <input
-                type='text'
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder='Ej: Juan'
-                className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
-                style={{
-                  backgroundColor: 'var(--color-background)',
-                  borderColor: 'var(--color-background-accent)',
-                  color: 'var(--color-text)',
-                }}
-              />
-            </div>
+                {/* Customer Name */}
+                <div className='mb-4'>
+                  <label
+                    className='flex items-center gap-2 text-sm mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <User size={16} />
+                    <span>Nombre del cliente (opcional)</span>
+                  </label>
+                  <input
+                    type='text'
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    placeholder='Ej: Juan'
+                    className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                    style={{
+                      backgroundColor: 'var(--color-background)',
+                      borderColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                </div>
 
-            {/* Order Type (Pickup / Delivery) */}
-            <div className='mb-4'>
-              <label
-                className='flex items-center gap-2 text-sm mb-2'
-                style={{ color: 'var(--color-text)' }}
-              >
-                <span>Tipo de entrega</span>
-              </label>
-              <div className='flex gap-2'>
-                <button
-                  onClick={() => setOrderType('pickup')}
-                  className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
-                  style={{
-                    backgroundColor:
-                      orderType === 'pickup'
-                        ? 'var(--color-accent)'
-                        : 'var(--color-background)',
-                    color:
-                      orderType === 'pickup'
-                        ? 'var(--color-on-accent)'
-                        : 'var(--color-text)',
-                  }}
-                >
-                  <Home size={16} />
-                  Retiro
-                </button>
-                <button
-                  onClick={() => setOrderType('delivery')}
-                  className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
-                  style={{
-                    backgroundColor:
-                      orderType === 'delivery'
-                        ? 'var(--color-accent)'
-                        : 'var(--color-background)',
-                    color:
-                      orderType === 'delivery'
-                        ? 'var(--color-on-accent)'
-                        : 'var(--color-text)',
-                  }}
-                >
-                  <Truck size={16} />
-                  Delivery
-                </button>
-              </div>
-            </div>
+                {/* Order Type (Pickup / Delivery) */}
+                <div className='mb-4'>
+                  <label
+                    className='flex items-center gap-2 text-sm mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <span>Tipo de entrega</span>
+                  </label>
+                  <div className='flex gap-2'>
+                    <button
+                      onClick={() => setOrderType('pickup')}
+                      className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                      style={{
+                        backgroundColor:
+                          orderType === 'pickup'
+                            ? 'var(--color-accent)'
+                            : 'var(--color-background)',
+                        color:
+                          orderType === 'pickup'
+                            ? 'var(--color-on-accent)'
+                            : 'var(--color-text)',
+                      }}
+                    >
+                      <Home size={16} />
+                      Retiro
+                    </button>
+                    <button
+                      onClick={() => setOrderType('delivery')}
+                      className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                      style={{
+                        backgroundColor:
+                          orderType === 'delivery'
+                            ? 'var(--color-accent)'
+                            : 'var(--color-background)',
+                        color:
+                          orderType === 'delivery'
+                            ? 'var(--color-on-accent)'
+                            : 'var(--color-text)',
+                      }}
+                    >
+                      <Truck size={16} />
+                      Delivery
+                    </button>
+                  </div>
+                </div>
+
+                {/* Delivery Address - only show when delivery is selected */}
+                {orderType === 'delivery' && (
+                  <div className='mb-4'>
+                    <label
+                      className='flex items-center gap-2 text-sm mb-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      <Truck size={16} />
+                      <span>Dirección de entrega</span>
+                    </label>
+                    <input
+                      type='text'
+                      value={deliveryAddress}
+                      onChange={(e) => setDeliveryAddress(e.target.value)}
+                      placeholder='Ej: Calle 123, Piso 4'
+                      className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                      style={{
+                        backgroundColor: 'var(--color-background)',
+                        borderColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                      }}
+                    />
+                  </div>
+                )}
+              </>
+            )}
 
             <div
               className='flex justify-between text-2xl font-bold mb-4'
@@ -2067,6 +2502,42 @@ export function POSView() {
                     >
                       <CreditCard size={20} />
                       Online
+                    </button>
+                    <button
+                      onClick={() => setPaymentMethod('card')}
+                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      style={
+                        paymentMethod === 'card'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <CreditCard size={20} />
+                      Tarjeta
+                    </button>
+                    <button
+                      onClick={() => setPaymentMethod('on_delivery')}
+                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      style={
+                        paymentMethod === 'on_delivery'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <Truck size={20} />
+                      Contra Entrega
                     </button>
                   </div>
                 </div>
@@ -2270,6 +2741,29 @@ export function POSView() {
                 >
                   Pedidos en Cocina (KDS)
                 </h2>
+                {/* Connection Status Indicator */}
+                <span
+                  className='text-xs px-2 py-1 rounded-full font-medium'
+                  style={{
+                    backgroundColor:
+                      kdsConnectionStatus === 'connected'
+                        ? '#10b981'
+                        : kdsConnectionStatus === 'connecting'
+                        ? '#f59e0b'
+                        : kdsConnectionStatus === 'error'
+                        ? '#ef4444'
+                        : '#6b7280',
+                    color: 'white',
+                  }}
+                >
+                  {kdsConnectionStatus === 'connected'
+                    ? 'Conectado'
+                    : kdsConnectionStatus === 'connecting'
+                    ? 'Conectando...'
+                    : kdsConnectionStatus === 'error'
+                    ? 'Error'
+                    : 'Desconectado'}
+                </span>
               </div>
               <button
                 onClick={() => setShowKdsPanel(false)}
@@ -2351,6 +2845,73 @@ export function POSView() {
                               )}
                             </span>
                           )}
+                          {order.order_type === 'delivery' && (
+                            <div className='mt-1'>
+                              {kdsEditingAddress === order.id ? (
+                                <div className='flex items-center gap-1'>
+                                  <input
+                                    type='text'
+                                    value={kdsAddressValue}
+                                    onChange={(e) =>
+                                      setKdsAddressValue(e.target.value)
+                                    }
+                                    className='text-xs px-2 py-1 rounded border flex-1'
+                                    style={{
+                                      backgroundColor:
+                                        'var(--color-background)',
+                                      borderColor:
+                                        'var(--color-background-accent)',
+                                      color: 'var(--color-text)',
+                                    }}
+                                    placeholder='Dirección...'
+                                  />
+                                  <button
+                                    onClick={() =>
+                                      updateKdsOrderAddress(
+                                        order.id,
+                                        kdsAddressValue
+                                      )
+                                    }
+                                    className='text-xs px-2 py-1 rounded'
+                                    style={{
+                                      backgroundColor: 'var(--color-primary)',
+                                      color: 'var(--color-on-primary)',
+                                    }}
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    onClick={() => setKdsEditingAddress(null)}
+                                    className='text-xs px-2 py-1 rounded'
+                                    style={{
+                                      backgroundColor:
+                                        'var(--color-background-accent)',
+                                      color: 'var(--color-text)',
+                                    }}
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <div
+                                  className='text-xs italic flex items-center gap-1 cursor-pointer hover:opacity-80'
+                                  style={{
+                                    color: 'var(--color-text)',
+                                    opacity: 0.8,
+                                  }}
+                                  onClick={() => {
+                                    setKdsEditingAddress(order.id);
+                                    setKdsAddressValue(
+                                      order.delivery_address || ''
+                                    );
+                                  }}
+                                >
+                                  📍 {order.delivery_address || 'Sin dirección'}
+                                  <Pencil size={10} />
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {order.scheduled_time && (
                             <div
                               className='flex items-center gap-1 text-xs mt-1 font-medium'
@@ -2383,17 +2944,24 @@ export function POSView() {
                             backgroundColor:
                               order.status === 'pending'
                                 ? 'var(--color-accent)'
+                                : order.status === 'on_delivery'
+                                ? '#3b82f6'
                                 : 'var(--color-primary)',
                             color:
                               order.status === 'pending'
                                 ? 'var(--color-on-accent)'
-                                : 'var(--color-on-primary)',
+                                : 'white',
                           }}
                         >
                           {order.status === 'pending' ? (
                             <>
                               <ChefHat size={12} />
                               Pendiente
+                            </>
+                          ) : order.status === 'on_delivery' ? (
+                            <>
+                              <Truck size={12} />
+                              En Camino
                             </>
                           ) : (
                             <>
@@ -2405,33 +2973,405 @@ export function POSView() {
                       </div>
 
                       <div className='space-y-2 mb-4'>
-                        {order.items.map((item, idx) => (
-                          <div
-                            key={idx}
-                            className='text-sm'
-                            style={{ color: 'var(--color-text)' }}
-                          >
-                            <div className='flex justify-between'>
-                              <span>
-                                {item.quantity}x {item.product_name}
-                              </span>
-                              <span className='opacity-60'>
-                                {formatPrice(
-                                  item.product_price * item.quantity
-                                )}
-                              </span>
-                            </div>
-                            {item.removed_ingredients &&
-                              item.removed_ingredients.length > 0 && (
+                        {(() => {
+                          // Helper to create a signature for an item
+                          const getItemSignature = (item: KDSOrderItem) => {
+                            const removed = (item.removed_ingredients || [])
+                              .slice()
+                              .sort()
+                              .join(',');
+                            return `${item.product_name}|${removed}`;
+                          };
+
+                          // Helper to detect combo size (products per combo instance)
+                          const detectComboSize = (items: KDSOrderItem[]) => {
+                            if (items.length <= 1) return items.length;
+                            const firstProductName = items[0].product_name;
+                            for (let i = 1; i < items.length; i++) {
+                              if (items[i].product_name === firstProductName) {
+                                return i;
+                              }
+                            }
+                            return items.length;
+                          };
+
+                          // Helper to get signature for a combo instance
+                          const getComboInstanceSignature = (
+                            items: KDSOrderItem[]
+                          ) => {
+                            return items.map(getItemSignature).join('::');
+                          };
+
+                          // Group items by combo_name
+                          const comboGroups: Record<string, KDSOrderItem[]> =
+                            {};
+                          const standaloneItems: {
+                            item: KDSOrderItem;
+                            originalIndex: number;
+                          }[] = [];
+
+                          order.items.forEach((item, idx) => {
+                            if (item.combo_name) {
+                              if (!comboGroups[item.combo_name]) {
+                                comboGroups[item.combo_name] = [];
+                              }
+                              comboGroups[item.combo_name].push(item);
+                            } else {
+                              standaloneItems.push({
+                                item,
+                                originalIndex: idx,
+                              });
+                            }
+                          });
+
+                          // Process combo groups into unique instances with quantities
+                          type ProcessedCombo = {
+                            comboName: string;
+                            items: {
+                              item: KDSOrderItem;
+                              originalIndex: number;
+                            }[];
+                            quantity: number;
+                          };
+                          const processedCombos: ProcessedCombo[] = [];
+
+                          // Track original indices for combo items
+                          let comboItemIndex = 0;
+                          const comboItemIndices: number[] = [];
+                          order.items.forEach((item, idx) => {
+                            if (item.combo_name) {
+                              comboItemIndices.push(idx);
+                            }
+                          });
+
+                          Object.entries(comboGroups).forEach(
+                            ([comboName, allItems]) => {
+                              const comboSize = detectComboSize(allItems);
+                              const instances: {
+                                item: KDSOrderItem;
+                                originalIndex: number;
+                              }[][] = [];
+
+                              // Split items into individual combo instances
+                              for (
+                                let i = 0;
+                                i < allItems.length;
+                                i += comboSize
+                              ) {
+                                const instanceItems = allItems
+                                  .slice(i, i + comboSize)
+                                  .map((item, j) => ({
+                                    item,
+                                    originalIndex:
+                                      comboItemIndices[comboItemIndex + i + j],
+                                  }));
+                                instances.push(instanceItems);
+                              }
+                              comboItemIndex += allItems.length;
+
+                              // Group identical instances
+                              const instanceMap = new Map<
+                                string,
+                                {
+                                  items: {
+                                    item: KDSOrderItem;
+                                    originalIndex: number;
+                                  }[];
+                                  count: number;
+                                }
+                              >();
+
+                              instances.forEach((instance) => {
+                                const signature = getComboInstanceSignature(
+                                  instance.map((i) => i.item)
+                                );
+                                const existing = instanceMap.get(signature);
+                                if (existing) {
+                                  existing.count++;
+                                } else {
+                                  instanceMap.set(signature, {
+                                    items: instance,
+                                    count: 1,
+                                  });
+                                }
+                              });
+
+                              // Convert to processed combos
+                              instanceMap.forEach(({ items, count }) => {
+                                processedCombos.push({
+                                  comboName,
+                                  items,
+                                  quantity: count,
+                                });
+                              });
+                            }
+                          );
+
+                          const elements: React.ReactNode[] = [];
+
+                          // Render combo groups
+                          processedCombos.forEach((combo, comboIdx) => {
+                            // Combo header
+                            elements.push(
+                              <div
+                                key={`combo-header-${comboIdx}`}
+                                className='text-xs font-bold px-2 py-1 rounded'
+                                style={{
+                                  backgroundColor: 'var(--color-accent)',
+                                  color: 'var(--color-on-accent)',
+                                  marginTop: comboIdx > 0 ? '0.5rem' : '0',
+                                }}
+                              >
+                                {combo.quantity > 1
+                                  ? `${combo.quantity}x COMBO`
+                                  : 'COMBO'}{' '}
+                                {combo.comboName}
+                              </div>
+                            );
+
+                            // Combo products
+                            combo.items.forEach(
+                              ({ item, originalIndex }, itemIdx) => {
+                                const removableIngredients =
+                                  getRemovableIngredientsForProduct(
+                                    item.product_name
+                                  );
+                                const isEditingThis =
+                                  kdsEditingIngredients?.orderId === order.id &&
+                                  kdsEditingIngredients?.itemIndex ===
+                                    originalIndex;
+
+                                elements.push(
+                                  <div
+                                    key={`combo-${comboIdx}-item-${itemIdx}`}
+                                    className='text-sm rounded-lg p-2'
+                                    style={{
+                                      color: 'var(--color-text)',
+                                      backgroundColor: isEditingThis
+                                        ? 'var(--color-background-accent)'
+                                        : 'transparent',
+                                      marginLeft: '0.75rem',
+                                    }}
+                                  >
+                                    <div className='flex justify-between items-center'>
+                                      <span>
+                                        {combo.quantity > 1
+                                          ? `${combo.quantity}x`
+                                          : `${item.quantity}x`}{' '}
+                                        {item.product_name}
+                                      </span>
+                                      <div className='flex items-center gap-2'>
+                                        <span className='opacity-60'>
+                                          {formatPrice(
+                                            item.product_price *
+                                              item.quantity *
+                                              combo.quantity
+                                          )}
+                                        </span>
+                                        {removableIngredients.length > 0 && (
+                                          <button
+                                            onClick={() =>
+                                              setKdsEditingIngredients(
+                                                isEditingThis
+                                                  ? null
+                                                  : {
+                                                      orderId: order.id,
+                                                      itemIndex: originalIndex,
+                                                    }
+                                              )
+                                            }
+                                            className='p-1 rounded hover:opacity-80'
+                                            style={{
+                                              backgroundColor: isEditingThis
+                                                ? 'var(--color-accent)'
+                                                : 'var(--color-background-accent)',
+                                              color: isEditingThis
+                                                ? 'var(--color-on-accent)'
+                                                : 'var(--color-text)',
+                                            }}
+                                            title='Editar ingredientes'
+                                          >
+                                            <Beef size={12} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {item.removed_ingredients &&
+                                      item.removed_ingredients.length > 0 && (
+                                        <div
+                                          className='text-xs italic ml-4'
+                                          style={{
+                                            color: 'var(--color-primary)',
+                                          }}
+                                        >
+                                          Sin:{' '}
+                                          {item.removed_ingredients.join(', ')}
+                                        </div>
+                                      )}
+
+                                    {/* Inline ingredient toggles */}
+                                    {isEditingThis && (
+                                      <div className='mt-2 flex flex-wrap gap-1'>
+                                        {removableIngredients.map((ing) => {
+                                          const isRemoved = (
+                                            item.removed_ingredients || []
+                                          ).includes(ing);
+                                          return (
+                                            <button
+                                              key={ing}
+                                              onClick={() =>
+                                                toggleKdsOrderIngredient(
+                                                  order.id,
+                                                  originalIndex,
+                                                  ing
+                                                )
+                                              }
+                                              className='px-2 py-0.5 rounded text-xs font-medium transition-all'
+                                              style={{
+                                                backgroundColor: isRemoved
+                                                  ? 'var(--color-primary)'
+                                                  : 'var(--color-background)',
+                                                color: isRemoved
+                                                  ? 'var(--color-on-primary)'
+                                                  : 'var(--color-text)',
+                                                textDecoration: isRemoved
+                                                  ? 'line-through'
+                                                  : 'none',
+                                              }}
+                                            >
+                                              {isRemoved ? 'SIN ' : ''}
+                                              {ing}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              }
+                            );
+                          });
+
+                          // Render standalone items
+                          standaloneItems.forEach(
+                            ({ item, originalIndex }, idx) => {
+                              const removableIngredients =
+                                getRemovableIngredientsForProduct(
+                                  item.product_name
+                                );
+                              const isEditingThis =
+                                kdsEditingIngredients?.orderId === order.id &&
+                                kdsEditingIngredients?.itemIndex ===
+                                  originalIndex;
+
+                              elements.push(
                                 <div
-                                  className='text-xs italic ml-4'
-                                  style={{ color: 'var(--color-primary)' }}
+                                  key={`standalone-${idx}`}
+                                  className='text-sm rounded-lg p-2'
+                                  style={{
+                                    color: 'var(--color-text)',
+                                    backgroundColor: isEditingThis
+                                      ? 'var(--color-background-accent)'
+                                      : 'transparent',
+                                  }}
                                 >
-                                  Sin: {item.removed_ingredients.join(', ')}
+                                  <div className='flex justify-between items-center'>
+                                    <span>
+                                      {item.quantity}x {item.product_name}
+                                    </span>
+                                    <div className='flex items-center gap-2'>
+                                      <span className='opacity-60'>
+                                        {formatPrice(
+                                          item.product_price * item.quantity
+                                        )}
+                                      </span>
+                                      {removableIngredients.length > 0 && (
+                                        <button
+                                          onClick={() =>
+                                            setKdsEditingIngredients(
+                                              isEditingThis
+                                                ? null
+                                                : {
+                                                    orderId: order.id,
+                                                    itemIndex: originalIndex,
+                                                  }
+                                            )
+                                          }
+                                          className='p-1 rounded hover:opacity-80'
+                                          style={{
+                                            backgroundColor: isEditingThis
+                                              ? 'var(--color-accent)'
+                                              : 'var(--color-background-accent)',
+                                            color: isEditingThis
+                                              ? 'var(--color-on-accent)'
+                                              : 'var(--color-text)',
+                                          }}
+                                          title='Editar ingredientes'
+                                        >
+                                          <Beef size={12} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {item.removed_ingredients &&
+                                    item.removed_ingredients.length > 0 && (
+                                      <div
+                                        className='text-xs italic ml-4'
+                                        style={{
+                                          color: 'var(--color-primary)',
+                                        }}
+                                      >
+                                        Sin:{' '}
+                                        {item.removed_ingredients.join(', ')}
+                                      </div>
+                                    )}
+
+                                  {/* Inline ingredient toggles */}
+                                  {isEditingThis && (
+                                    <div className='mt-2 flex flex-wrap gap-1'>
+                                      {removableIngredients.map((ing) => {
+                                        const isRemoved = (
+                                          item.removed_ingredients || []
+                                        ).includes(ing);
+                                        return (
+                                          <button
+                                            key={ing}
+                                            onClick={() =>
+                                              toggleKdsOrderIngredient(
+                                                order.id,
+                                                originalIndex,
+                                                ing
+                                              )
+                                            }
+                                            className='px-2 py-0.5 rounded text-xs font-medium transition-all'
+                                            style={{
+                                              backgroundColor: isRemoved
+                                                ? 'var(--color-primary)'
+                                                : 'var(--color-background)',
+                                              color: isRemoved
+                                                ? 'var(--color-on-primary)'
+                                                : 'var(--color-text)',
+                                              textDecoration: isRemoved
+                                                ? 'line-through'
+                                                : 'none',
+                                            }}
+                                          >
+                                            {isRemoved ? 'SIN ' : ''}
+                                            {ing}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
-                              )}
-                          </div>
-                        ))}
+                              );
+                            }
+                          );
+
+                          return elements;
+                        })()}
                       </div>
 
                       <div
@@ -2447,34 +3387,73 @@ export function POSView() {
                           {formatPrice(order.total)}
                         </span>
 
-                        {order.status === 'pending' && (
+                        {(order.status === 'pending' ||
+                          order.status === 'on_delivery') && (
                           <div className='flex items-center gap-2'>
-                            <button
-                              onClick={() => loadOrderForEdit(order)}
-                              className='p-1.5 rounded-lg transition-all hover:opacity-80'
-                              style={{
-                                backgroundColor:
-                                  'var(--color-background-accent)',
-                              }}
-                              title='Editar pedido'
-                            >
-                              <Pencil
-                                size={16}
-                                style={{ color: 'var(--color-text)' }}
-                              />
-                            </button>
-                            <button
-                              onClick={() =>
-                                updateKdsOrderStatus(order.id, 'completed')
-                              }
-                              className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
-                              style={{
-                                backgroundColor: 'var(--color-primary)',
-                                color: 'var(--color-on-primary)',
-                              }}
-                            >
-                              Marcar Entregado
-                            </button>
+                            {order.status === 'pending' && (
+                              <button
+                                onClick={() => loadOrderForEdit(order)}
+                                className='p-1.5 rounded-lg transition-all hover:opacity-80'
+                                style={{
+                                  backgroundColor:
+                                    'var(--color-background-accent)',
+                                }}
+                                title='Editar pedido'
+                              >
+                                <Pencil
+                                  size={16}
+                                  style={{ color: 'var(--color-text)' }}
+                                />
+                              </button>
+                            )}
+                            {/* For delivery orders: pending -> on_delivery -> completed */}
+                            {order.order_type === 'delivery' ? (
+                              order.status === 'pending' ? (
+                                <button
+                                  onClick={() =>
+                                    updateKdsOrderStatus(
+                                      order.id,
+                                      'on_delivery'
+                                    )
+                                  }
+                                  className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
+                                  style={{
+                                    backgroundColor: '#3b82f6',
+                                    color: 'white',
+                                  }}
+                                >
+                                  <Truck size={14} />
+                                  Enviar
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() =>
+                                    updateKdsOrderStatus(order.id, 'completed')
+                                  }
+                                  className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
+                                  style={{
+                                    backgroundColor: 'var(--color-primary)',
+                                    color: 'var(--color-on-primary)',
+                                  }}
+                                >
+                                  Entregado
+                                </button>
+                              )
+                            ) : (
+                              /* For pickup orders: pending -> completed directly */
+                              <button
+                                onClick={() =>
+                                  updateKdsOrderStatus(order.id, 'completed')
+                                }
+                                className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
+                                style={{
+                                  backgroundColor: 'var(--color-primary)',
+                                  color: 'var(--color-on-primary)',
+                                }}
+                              >
+                                Marcar Entregado
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -2678,15 +3657,84 @@ export function POSView() {
                           </p>
                         )}
 
-                        {/* Show removed ingredients if any */}
-                        {selection.removedIngredients.length > 0 && (
-                          <div
-                            className='text-xs italic'
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            Sin: {selection.removedIngredients.join(', ')}
-                          </div>
-                        )}
+                        {/* Ingredient toggles for this product */}
+                        {(() => {
+                          const removableIngredients =
+                            productRemovableIngredients[
+                              selection.productName
+                            ] || [];
+
+                          if (removableIngredients.length === 0) return null;
+
+                          return (
+                            <div className='mt-2'>
+                              <p
+                                className='text-xs mb-1 opacity-60'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                Ingredientes:
+                              </p>
+                              <div className='flex flex-wrap gap-1'>
+                                {removableIngredients.map((ing) => {
+                                  const isRemoved =
+                                    selection.removedIngredients.includes(ing);
+                                  return (
+                                    <button
+                                      key={ing}
+                                      onClick={() => {
+                                        // Toggle ingredient in comboSelections
+                                        setComboSelections((prev) =>
+                                          prev.map((sel) => {
+                                            // Find matching selection
+                                            const matchingSelections =
+                                              prev.filter(
+                                                (s) => s.slotId === slot.id
+                                              );
+                                            const matchIndex =
+                                              matchingSelections.indexOf(sel);
+                                            if (
+                                              sel.slotId === slot.id &&
+                                              matchIndex === selIndex
+                                            ) {
+                                              const newRemoved = isRemoved
+                                                ? sel.removedIngredients.filter(
+                                                    (i) => i !== ing
+                                                  )
+                                                : [
+                                                    ...sel.removedIngredients,
+                                                    ing,
+                                                  ];
+                                              return {
+                                                ...sel,
+                                                removedIngredients: newRemoved,
+                                              };
+                                            }
+                                            return sel;
+                                          })
+                                        );
+                                      }}
+                                      className='px-2 py-0.5 rounded text-xs font-medium transition-all'
+                                      style={{
+                                        backgroundColor: isRemoved
+                                          ? 'var(--color-primary)'
+                                          : 'var(--color-background-secondary)',
+                                        color: isRemoved
+                                          ? 'var(--color-on-primary)'
+                                          : 'var(--color-text)',
+                                        textDecoration: isRemoved
+                                          ? 'line-through'
+                                          : 'none',
+                                      }}
+                                    >
+                                      {isRemoved ? 'SIN ' : ''}
+                                      {ing}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     ))}
                   </div>

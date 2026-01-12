@@ -33,12 +33,17 @@ export function useSales() {
       product_price: number;
       production_cost: number;
       quantity: number;
+      removedIngredients?: string[];
+      combo_name?: string;
     }>,
     paymentMethod: string,
     cashReceived?: number,
     billsReceived?: Record<number, number>,
     billsChange?: Record<number, number>,
-    scheduledTime?: string
+    scheduledTime?: string,
+    customerName?: string,
+    orderType?: 'pickup' | 'delivery',
+    deliveryAddress?: string
   ) => {
     try {
       await db.init();
@@ -71,6 +76,9 @@ export function useSales() {
         bills_received: billsReceived,
         bills_change: billsChange,
         scheduled_time: scheduledTime,
+        customer_name: customerName,
+        order_type: orderType,
+        delivery_address: deliveryAddress,
         completed_at: now,
         created_at: now,
       };
@@ -86,6 +94,8 @@ export function useSales() {
         production_cost: item.production_cost || 0,
         quantity: item.quantity,
         subtotal: item.product_price * item.quantity,
+        removed_ingredients: item.removedIngredients,
+        combo_name: item.combo_name,
         created_at: now,
       }));
 

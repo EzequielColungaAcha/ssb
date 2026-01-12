@@ -262,13 +262,21 @@ export function useMateriaPrima() {
 
   const deductMateriaPrimaStock = async (
     productId: string,
-    quantity: number = 1
+    quantity: number = 1,
+    removedIngredients?: string[]
   ) => {
     try {
       await db.init();
       const links = await getProductMateriaPrima(productId);
 
       for (const link of links) {
+        // Skip if this ingredient was removed from the order
+        if (removedIngredients && removedIngredients.length > 0) {
+          const mp = materiaPrima.find((m) => m.id === link.materia_prima_id);
+          if (mp && removedIngredients.includes(mp.name)) {
+            continue;
+          }
+        }
         await updateStock(link.materia_prima_id, -(link.quantity * quantity));
       }
     } catch (error) {

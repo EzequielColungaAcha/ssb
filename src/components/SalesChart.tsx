@@ -5,7 +5,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { ChartContainer, ChartTooltip } from './ui/chart';
 
 type TimeFrame = 'hour' | 'day' | 'week' | 'month' | 'year';
-type ChartMode = 'sales' | 'products';
+type ChartMode = 'sales' | 'products' | 'delivery';
 
 interface ChartDataPoint {
   label: string;
@@ -118,7 +118,7 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
           groupedData[key].minDate = sortDate;
         }
       });
-    } else {
+    } else if (chartMode === 'products') {
       const saleIdToDate = new Map<string, Date>();
       sales.forEach((sale) => {
         saleIdToDate.set(sale.id, new Date(sale.completed_at));
@@ -137,6 +137,41 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
         groupedData[key].count += item.quantity;
         if (sortDate < groupedData[key].minDate) {
           groupedData[key].minDate = sortDate;
+        }
+      });
+    } else if (chartMode === 'delivery') {
+      // Delivery mode: show average delivery time variance per period
+      const deliverySales = sales.filter(
+        (sale) =>
+          sale.order_type === 'delivery' &&
+          sale.scheduled_time &&
+          sale.delivered_at
+      );
+
+      deliverySales.forEach((sale) => {
+        const saleDate = new Date(sale.completed_at);
+        const { key, sortDate } = getTimeKey(saleDate);
+
+        const scheduled = new Date(sale.scheduled_time!).getTime();
+        const delivered = new Date(sale.delivered_at!).getTime();
+        const diffMinutes = (delivered - scheduled) / (1000 * 60);
+
+        if (!groupedData[key]) {
+          groupedData[key] = { value: 0, count: 0, minDate: sortDate };
+        }
+        groupedData[key].value += diffMinutes;
+        groupedData[key].count += 1;
+        if (sortDate < groupedData[key].minDate) {
+          groupedData[key].minDate = sortDate;
+        }
+      });
+
+      // Calculate average for each period
+      Object.keys(groupedData).forEach((key) => {
+        if (groupedData[key].count > 0) {
+          groupedData[key].value = Math.round(
+            groupedData[key].value / groupedData[key].count
+          );
         }
       });
     }
@@ -163,7 +198,12 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
 
   const chartConfig = {
     value: {
-      label: chartMode === 'sales' ? 'Ventas' : 'Productos',
+      label:
+        chartMode === 'sales'
+          ? 'Ventas'
+          : chartMode === 'products'
+          ? 'Productos'
+          : 'Entregas',
       color: 'var(--color-primary)',
     },
   };
@@ -182,7 +222,12 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
           className='text-xl font-bold'
           style={{ color: 'var(--color-text)' }}
         >
-          Gráfico de {chartMode === 'sales' ? 'Ventas' : 'Productos'}
+          Gráfico de{' '}
+          {chartMode === 'sales'
+            ? 'Ventas'
+            : chartMode === 'products'
+            ? 'Productos'
+            : 'Tiempos de Entrega'}
         </h2>
         <div className='flex gap-2'>
           <div
@@ -220,6 +265,22 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
               }
             >
               Productos
+            </button>
+            <button
+              onClick={() => setChartMode('delivery')}
+              className={`px-3 py-1 rounded font-semibold text-sm transition-all ${
+                chartMode === 'delivery' ? 'text-white' : ''
+              }`}
+              style={
+                chartMode === 'delivery'
+                  ? {
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }
+                  : { color: 'var(--color-text)' }
+              }
+            >
+              Entregas
             </button>
           </div>
           <div
@@ -328,6 +389,8 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                 tickFormatter={(value) =>
                   chartMode === 'sales'
                     ? `$${value.toLocaleString()}`
+                    : chartMode === 'delivery'
+                    ? `${value > 0 ? '+' : ''}${value}m`
                     : value.toLocaleString()
                 }
               />
@@ -370,7 +433,7 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                             {count === 1 ? 'venta' : 'ventas'}
                           </div>
                         </>
-                      ) : (
+                      ) : chartMode === 'products' ? (
                         <>
                           <div
                             className='font-bold'
@@ -384,6 +447,30 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                           >
                             {formatNumber(count)}{' '}
                             {count === 1 ? 'producto' : 'productos'}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div
+                            className='font-bold'
+                            style={{
+                              color:
+                                Math.abs(value) <= 5
+                                  ? '#10b981'
+                                  : value > 0
+                                  ? '#ef4444'
+                                  : '#3b82f6',
+                            }}
+                          >
+                            {value > 0 ? '+' : ''}
+                            {value} min
+                          </div>
+                          <div
+                            className='text-xs opacity-60'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            {formatNumber(count)}{' '}
+                            {count === 1 ? 'entrega' : 'entregas'}
                           </div>
                         </>
                       )}
@@ -435,7 +522,7 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                   </span>
                 </div>
               </>
-            ) : (
+            ) : chartMode === 'products' ? (
               <>
                 <div>
                   <span className='opacity-60'>Total Unidades: </span>
@@ -450,6 +537,58 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
                 </div>
                 <div>
                   <span className='opacity-60'>Productos: </span>
+                  <span className='font-bold'>
+                    {chartData.reduce((sum, d) => sum + d.count, 0)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span className='opacity-60'>Promedio: </span>
+                  <span
+                    className='font-bold'
+                    style={{
+                      color: (() => {
+                        const totalCount = chartData.reduce(
+                          (sum, d) => sum + d.count,
+                          0
+                        );
+                        const avgDelay =
+                          totalCount > 0
+                            ? chartData.reduce(
+                                (sum, d) => sum + d.value * d.count,
+                                0
+                              ) / totalCount
+                            : 0;
+                        return Math.abs(avgDelay) <= 5
+                          ? '#10b981'
+                          : avgDelay > 0
+                          ? '#ef4444'
+                          : '#3b82f6';
+                      })(),
+                    }}
+                  >
+                    {(() => {
+                      const totalCount = chartData.reduce(
+                        (sum, d) => sum + d.count,
+                        0
+                      );
+                      const avgDelay =
+                        totalCount > 0
+                          ? Math.round(
+                              chartData.reduce(
+                                (sum, d) => sum + d.value * d.count,
+                                0
+                              ) / totalCount
+                            )
+                          : 0;
+                      return `${avgDelay > 0 ? '+' : ''}${avgDelay} min`;
+                    })()}
+                  </span>
+                </div>
+                <div>
+                  <span className='opacity-60'>Entregas: </span>
                   <span className='font-bold'>
                     {chartData.reduce((sum, d) => sum + d.count, 0)}
                   </span>

@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calendar, Package, History } from 'lucide-react';
+import {
+  Calendar,
+  Package,
+  History,
+  User,
+  Truck,
+  Home,
+  MapPin,
+  Clock,
+} from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { Sale, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
@@ -126,6 +135,37 @@ export function SalesView() {
                     {sale.cash_received &&
                       ` | Recibido: ${formatPrice(sale.cash_received)}`}
                   </div>
+                  {/* Customer name and order type */}
+                  <div className='flex items-center gap-2 mt-2 flex-wrap'>
+                    {sale.customer_name && (
+                      <span className='text-xs flex items-center gap-1 opacity-80'>
+                        <User size={12} />
+                        {sale.customer_name}
+                      </span>
+                    )}
+                    {sale.order_type && (
+                      <span
+                        className='text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1'
+                        style={{
+                          backgroundColor:
+                            sale.order_type === 'delivery'
+                              ? '#3b82f6'
+                              : '#10b981',
+                          color: 'white',
+                        }}
+                      >
+                        {sale.order_type === 'delivery' ? (
+                          <>
+                            <Truck size={10} /> Delivery
+                          </>
+                        ) : (
+                          <>
+                            <Home size={10} /> Retiro
+                          </>
+                        )}
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))
             )}
@@ -171,7 +211,61 @@ export function SalesView() {
                       {selectedSale.payment_method}
                     </div>
                   </div>
+                  {selectedSale.customer_name && (
+                    <div>
+                      <div className='opacity-90'>Cliente</div>
+                      <div className='font-semibold flex items-center gap-1'>
+                        <User size={12} />
+                        {selectedSale.customer_name}
+                      </div>
+                    </div>
+                  )}
+                  {selectedSale.order_type && (
+                    <div>
+                      <div className='opacity-90'>Tipo</div>
+                      <div className='font-semibold flex items-center gap-1'>
+                        {selectedSale.order_type === 'delivery' ? (
+                          <>
+                            <Truck size={12} /> Delivery
+                          </>
+                        ) : (
+                          <>
+                            <Home size={12} /> Retiro
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+                {selectedSale.delivery_address && (
+                  <div className='mt-3 text-sm'>
+                    <div className='opacity-90'>Dirección</div>
+                    <div className='font-semibold flex items-center gap-1'>
+                      <MapPin size={12} />
+                      {selectedSale.delivery_address}
+                    </div>
+                  </div>
+                )}
+                {selectedSale.scheduled_time && (
+                  <div className='mt-3 text-sm'>
+                    <div className='opacity-90'>Hora programada</div>
+                    <div className='font-semibold flex items-center gap-1'>
+                      <Clock size={12} />
+                      {new Date(selectedSale.scheduled_time).toLocaleTimeString(
+                        'es-AR',
+                        { hour: '2-digit', minute: '2-digit', hour12: false }
+                      )}
+                    </div>
+                  </div>
+                )}
+                {selectedSale.delivered_at && (
+                  <div className='mt-3 text-sm'>
+                    <div className='opacity-90'>Entregado</div>
+                    <div className='font-semibold'>
+                      {formatDate(selectedSale.delivered_at)}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className='mb-4'>
@@ -183,37 +277,224 @@ export function SalesView() {
                   Artículos
                 </h3>
                 <div className='space-y-2'>
-                  {saleItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className='flex justify-between items-center p-3 rounded-lg'
-                      style={{
-                        backgroundColor: 'var(--color-background-accent)',
-                      }}
-                    >
-                      <div>
-                        <div
-                          className='font-semibold'
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          {item.product_name}
-                        </div>
-                        <div
-                          className='text-sm opacity-60'
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          {formatPrice(item.product_price)} ×{' '}
-                          {formatNumber(item.quantity)}
-                        </div>
-                      </div>
-                      <div
-                        className='font-bold'
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {formatPrice(item.subtotal)}
-                      </div>
-                    </div>
-                  ))}
+                  {(() => {
+                    // Group items by combo_name
+                    const comboGroups: Record<string, typeof saleItems> = {};
+                    const standaloneItems: typeof saleItems = [];
+
+                    saleItems.forEach((item) => {
+                      if (item.combo_name) {
+                        if (!comboGroups[item.combo_name]) {
+                          comboGroups[item.combo_name] = [];
+                        }
+                        comboGroups[item.combo_name].push(item);
+                      } else {
+                        standaloneItems.push(item);
+                      }
+                    });
+
+                    // Helper to create a signature for a combo instance
+                    const getItemSignature = (item: (typeof saleItems)[0]) => {
+                      const removed = (item.removed_ingredients || [])
+                        .sort()
+                        .join(',');
+                      return `${item.product_name}|${removed}`;
+                    };
+
+                    // Helper to detect combo size (products per combo instance)
+                    const detectComboSize = (items: typeof saleItems) => {
+                      if (items.length <= 1) return items.length;
+                      // Find when the first product name repeats
+                      const firstProductName = items[0].product_name;
+                      for (let i = 1; i < items.length; i++) {
+                        if (items[i].product_name === firstProductName) {
+                          return i;
+                        }
+                      }
+                      return items.length; // No repeat found, all items are one combo
+                    };
+
+                    // Helper to get signature for a combo instance (array of items)
+                    const getComboInstanceSignature = (
+                      items: typeof saleItems
+                    ) => {
+                      return items.map(getItemSignature).join('::');
+                    };
+
+                    // Process combo groups into unique instances with quantities
+                    type ComboInstance = {
+                      comboName: string;
+                      items: typeof saleItems;
+                      quantity: number;
+                      total: number;
+                    };
+
+                    const processedCombos: ComboInstance[] = [];
+
+                    Object.entries(comboGroups).forEach(
+                      ([comboName, allItems]) => {
+                        const comboSize = detectComboSize(allItems);
+                        const instances: (typeof saleItems)[] = [];
+
+                        // Split items into individual combo instances
+                        for (let i = 0; i < allItems.length; i += comboSize) {
+                          instances.push(allItems.slice(i, i + comboSize));
+                        }
+
+                        // Group identical instances
+                        const instanceMap = new Map<
+                          string,
+                          { items: typeof saleItems; count: number }
+                        >();
+
+                        instances.forEach((instance) => {
+                          const signature = getComboInstanceSignature(instance);
+                          const existing = instanceMap.get(signature);
+                          if (existing) {
+                            existing.count++;
+                          } else {
+                            instanceMap.set(signature, {
+                              items: instance,
+                              count: 1,
+                            });
+                          }
+                        });
+
+                        // Convert to processed combos
+                        instanceMap.forEach(({ items, count }) => {
+                          const instanceTotal = items.reduce(
+                            (sum, item) => sum + item.subtotal,
+                            0
+                          );
+                          processedCombos.push({
+                            comboName,
+                            items,
+                            quantity: count,
+                            total: instanceTotal * count,
+                          });
+                        });
+                      }
+                    );
+
+                    return (
+                      <>
+                        {/* Render combo groups */}
+                        {processedCombos.map((combo, comboIdx) => (
+                          <div
+                            key={`${combo.comboName}-${comboIdx}`}
+                            className='p-3 rounded-lg'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                            }}
+                          >
+                            {/* Combo header */}
+                            <div className='flex justify-between items-center mb-2'>
+                              <div
+                                className='font-bold flex items-center gap-2'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                <span
+                                  className='text-xs px-1.5 py-0.5 rounded'
+                                  style={{
+                                    backgroundColor: 'var(--color-accent)',
+                                    color: 'var(--color-on-accent)',
+                                  }}
+                                >
+                                  {combo.quantity > 1
+                                    ? `${combo.quantity}x COMBO`
+                                    : 'COMBO'}
+                                </span>
+                                {combo.comboName}
+                              </div>
+                              <div
+                                className='font-bold'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                {formatPrice(combo.total)}
+                              </div>
+                            </div>
+                            {/* Combo products */}
+                            <div
+                              className='pl-3 border-l-2 space-y-1'
+                              style={{
+                                borderColor: 'var(--color-accent)',
+                              }}
+                            >
+                              {combo.items.map((item, itemIdx) => (
+                                <div key={itemIdx}>
+                                  <div
+                                    className='text-sm'
+                                    style={{ color: 'var(--color-text)' }}
+                                  >
+                                    {combo.quantity > 1
+                                      ? `${combo.quantity}x `
+                                      : ''}
+                                    {item.product_name}
+                                  </div>
+                                  {item.removed_ingredients &&
+                                    item.removed_ingredients.length > 0 && (
+                                      <div
+                                        className='text-xs italic'
+                                        style={{
+                                          color: 'var(--color-primary)',
+                                        }}
+                                      >
+                                        Sin:{' '}
+                                        {item.removed_ingredients.join(', ')}
+                                      </div>
+                                    )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Render standalone items */}
+                        {standaloneItems.map((item) => (
+                          <div
+                            key={item.id}
+                            className='p-3 rounded-lg'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                            }}
+                          >
+                            <div className='flex justify-between items-center'>
+                              <div>
+                                <div
+                                  className='font-semibold'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  {item.product_name}
+                                </div>
+                                <div
+                                  className='text-sm opacity-60'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  {formatPrice(item.product_price)} ×{' '}
+                                  {formatNumber(item.quantity)}
+                                </div>
+                              </div>
+                              <div
+                                className='font-bold'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                {formatPrice(item.subtotal)}
+                              </div>
+                            </div>
+                            {item.removed_ingredients &&
+                              item.removed_ingredients.length > 0 && (
+                                <div
+                                  className='text-xs italic mt-1'
+                                  style={{ color: 'var(--color-primary)' }}
+                                >
+                                  Sin: {item.removed_ingredients.join(', ')}
+                                </div>
+                              )}
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
