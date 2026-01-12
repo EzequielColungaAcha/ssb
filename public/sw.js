@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ssb-pos-app-v2';
+const CACHE_NAME = 'ssb-pos-app-v3';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -31,12 +31,19 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: cache-first strategy with runtime caching
+// Fetch: network-first for API, cache-first for static assets
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests
   if (event.request.method !== 'GET') return;
 
   const request = event.request;
+  const url = new URL(request.url);
+
+  // NEVER cache API requests - always go to network
+  if (url.pathname.startsWith('/api/') || url.pathname === '/health') {
+    event.respondWith(fetch(request));
+    return;
+  }
 
   // For navigations, try cache, then network, then offline fallback
   if (request.mode === 'navigate') {
@@ -50,7 +57,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For other requests (JS, CSS, images…) → cache-first, then network
+  // For static assets (JS, CSS, images) → cache-first, then network
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
