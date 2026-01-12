@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar,
   Package,
@@ -8,17 +8,41 @@ import {
   Home,
   MapPin,
   Clock,
+  CreditCard,
+  Banknote,
+  Smartphone,
+  DollarSign,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
 import { Sale, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { useTheme } from '../contexts/ThemeContext';
+import { toast } from 'sonner';
+
+// Payment method labels for consistent display
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  online: 'Transferencia',
+  card: 'Tarjeta',
+  on_delivery: 'Contra Entrega',
+  unpaid: 'Sin Pagar',
+};
+
+// Bill denominations for Argentina
+const BILL_DENOMINATIONS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100];
 
 export function SalesView() {
   const { theme } = useTheme();
-  const { sales, getSaleItems, loading } = useSales();
+  const { sales, getSaleItems, loading, updateSale, refresh } = useSales();
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
+
+  // Mark as paid state
+  const [markPaymentMethod, setMarkPaymentMethod] = useState<
+    'cash' | 'online' | 'card' | 'on_delivery'
+  >('cash');
+  const [markCashReceived, setMarkCashReceived] = useState(0);
+  const [markBillHistory, setMarkBillHistory] = useState<number[]>([]);
 
   const loadSaleItems = useCallback(
     async (saleId: string) => {
@@ -43,8 +67,114 @@ export function SalesView() {
   useEffect(() => {
     if (selectedSale) {
       loadSaleItems(selectedSale.id);
+      // Reset mark as paid state when selecting a new sale
+      setMarkPaymentMethod('cash');
+      setMarkCashReceived(0);
+      setMarkBillHistory([]);
     }
   }, [loadSaleItems, selectedSale]);
+
+  // Calculate change for mark as paid
+  const markChange = useMemo(() => {
+    if (!selectedSale) return 0;
+    return markCashReceived - selectedSale.total_amount;
+  }, [selectedSale, markCashReceived]);
+
+  // Calculate change breakdown
+  const markChangeBreakdown = useMemo(() => {
+    if (markChange <= 0) return null;
+
+    let remaining = markChange;
+    const breakdown: { bill_value: number; quantity: number }[] = [];
+
+    for (const denom of BILL_DENOMINATIONS) {
+      if (remaining >= denom) {
+        const count = Math.floor(remaining / denom);
+        breakdown.push({ bill_value: denom, quantity: count });
+        remaining = remaining % denom;
+      }
+    }
+
+    // If there's remaining change we can't give with bills, return null
+    if (remaining > 0) return null;
+    return breakdown;
+  }, [markChange]);
+
+  const addMarkCash = (amount: number) => {
+    setMarkCashReceived((prev) => prev + amount);
+    setMarkBillHistory((prev) => [...prev, amount]);
+  };
+
+  const undoLastMarkBill = () => {
+    if (markBillHistory.length > 0) {
+      const lastBill = markBillHistory[markBillHistory.length - 1];
+      setMarkCashReceived((prev) => prev - lastBill);
+      setMarkBillHistory((prev) => prev.slice(0, -1));
+    }
+  };
+
+  const resetMarkCash = () => {
+    setMarkCashReceived(0);
+    setMarkBillHistory([]);
+  };
+
+  const canMarkAsPaid = () => {
+    if (!selectedSale || selectedSale.payment_method !== 'unpaid') return false;
+    if (markPaymentMethod !== 'cash') return true;
+    if (markCashReceived < selectedSale.total_amount) return false;
+    if (markChange > 0 && !markChangeBreakdown) return false;
+    return true;
+  };
+
+  const handleMarkAsPaid = async () => {
+    if (!selectedSale || !canMarkAsPaid()) return;
+
+    try {
+      const updates: Partial<Sale> = {
+        payment_method: markPaymentMethod,
+      };
+
+      if (markPaymentMethod === 'cash') {
+        updates.cash_received = markCashReceived;
+        updates.change_given = markChange;
+        if (markChangeBreakdown) {
+          const billsChange: Record<string, number> = {};
+          markChangeBreakdown.forEach((b) => {
+            billsChange[b.bill_value.toString()] = b.quantity;
+          });
+          updates.bills_change = billsChange;
+        }
+        // Track bills received
+        const billsReceived: Record<string, number> = {};
+        markBillHistory.forEach((bill) => {
+          billsReceived[bill.toString()] =
+            (billsReceived[bill.toString()] || 0) + 1;
+        });
+        updates.bills_received = billsReceived;
+      }
+
+      await updateSale(selectedSale.id, updates);
+      // Refresh the selected sale
+      const updatedSales = sales.map((s) =>
+        s.id === selectedSale.id ? { ...s, ...updates } : s
+      );
+      const updatedSale = updatedSales.find((s) => s.id === selectedSale.id);
+      if (updatedSale) {
+        setSelectedSale(updatedSale as Sale);
+      }
+      await refresh();
+
+      // Reset state
+      setMarkCashReceived(0);
+      setMarkBillHistory([]);
+      setMarkPaymentMethod('cash');
+
+      toast.success('¡Pago registrado correctamente!');
+    } catch (error) {
+      console.error('Error marking sale as paid:', error);
+      toast.error('Error al registrar el pago');
+    }
+  };
 
   if (loading) {
     return <div className='p-6 dark:text-white'>Cargando...</div>;
@@ -96,16 +226,20 @@ export function SalesView() {
                   onClick={() => setSelectedSale(sale)}
                   className={`p-4 rounded-lg cursor-pointer transition-all ${
                     selectedSale?.id === sale.id ? '' : 'hover:opacity-70'
-                  }`}
+                  } ${sale.payment_method === 'unpaid' ? 'border-l-4' : ''}`}
                   style={{
                     backgroundColor:
                       selectedSale?.id === sale.id
                         ? 'var(--color-primary)'
+                        : sale.payment_method === 'unpaid'
+                        ? 'var(--color-accent-light, rgba(239, 68, 68, 0.1))'
                         : 'var(--color-background-accent)',
                     color:
                       selectedSale?.id === sale.id
                         ? 'var(--color-on-primary)'
                         : 'var(--color-text)',
+                    borderLeftColor:
+                      sale.payment_method === 'unpaid' ? '#ef4444' : undefined,
                   }}
                 >
                   <div className='flex justify-between items-start mb-2'>
@@ -121,6 +255,17 @@ export function SalesView() {
                       >
                         #{sales.length - index}
                       </div>
+                      {sale.payment_method === 'unpaid' && (
+                        <span
+                          className='text-xs px-2 py-0.5 rounded-full font-bold'
+                          style={{
+                            backgroundColor: '#ef4444',
+                            color: 'white',
+                          }}
+                        >
+                          SIN PAGAR
+                        </span>
+                      )}
                     </div>
                     <div className='text-lg font-bold'>
                       {formatPrice(sale.total_amount)}
@@ -131,7 +276,8 @@ export function SalesView() {
                     {formatDate(sale.completed_at)}
                   </div>
                   <div className='text-sm opacity-90 mt-1'>
-                    Pago: {sale.payment_method}
+                    Pago:{' '}
+                    {PAYMENT_LABELS[sale.payment_method] || sale.payment_method}
                     {sale.cash_received &&
                       ` | Recibido: ${formatPrice(sale.cash_received)}`}
                   </div>
@@ -207,8 +353,9 @@ export function SalesView() {
                   </div>
                   <div>
                     <div className='opacity-90'>Pago</div>
-                    <div className='font-semibold capitalize'>
-                      {selectedSale.payment_method}
+                    <div className='font-semibold'>
+                      {PAYMENT_LABELS[selectedSale.payment_method] ||
+                        selectedSale.payment_method}
                     </div>
                   </div>
                   {selectedSale.customer_name && (
@@ -575,6 +722,218 @@ export function SalesView() {
                   </>
                 )}
               </div>
+
+              {/* Mark as Paid Section - Only shows for unpaid sales */}
+              {selectedSale.payment_method === 'unpaid' && (
+                <div
+                  className='mt-6 p-4 rounded-lg border-2 border-dashed'
+                  style={{ borderColor: 'var(--color-accent)' }}
+                >
+                  <h3
+                    className='font-bold mb-4 flex items-center gap-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <DollarSign size={18} />
+                    Marcar como Pagado
+                  </h3>
+
+                  {/* Payment Method Selector */}
+                  <div className='grid grid-cols-2 gap-2 mb-4'>
+                    <button
+                      onClick={() => setMarkPaymentMethod('cash')}
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                      style={
+                        markPaymentMethod === 'cash'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <Banknote size={16} />
+                      Efectivo
+                    </button>
+                    <button
+                      onClick={() => setMarkPaymentMethod('online')}
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                      style={
+                        markPaymentMethod === 'online'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <Smartphone size={16} />
+                      Transferencia
+                    </button>
+                    <button
+                      onClick={() => setMarkPaymentMethod('card')}
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                      style={
+                        markPaymentMethod === 'card'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <CreditCard size={16} />
+                      Tarjeta
+                    </button>
+                    <button
+                      onClick={() => setMarkPaymentMethod('on_delivery')}
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                      style={
+                        markPaymentMethod === 'on_delivery'
+                          ? {
+                              backgroundColor: 'var(--color-primary)',
+                              color: 'var(--color-on-primary)',
+                            }
+                          : {
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }
+                      }
+                    >
+                      <Truck size={16} />
+                      Contra Entrega
+                    </button>
+                  </div>
+
+                  {/* Cash Calculator - Only for cash payment */}
+                  {markPaymentMethod === 'cash' && (
+                    <div className='mb-4'>
+                      <div className='flex items-center justify-between mb-2'>
+                        <span
+                          className='text-sm'
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          Efectivo Recibido:
+                        </span>
+                        <span
+                          className='font-bold'
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          {formatPrice(markCashReceived)}
+                        </span>
+                      </div>
+
+                      {/* Bill denomination buttons */}
+                      <div className='grid grid-cols-4 gap-2 mb-3'>
+                        {BILL_DENOMINATIONS.map((denom) => (
+                          <button
+                            key={denom}
+                            onClick={() => addMarkCash(denom)}
+                            className='py-2 rounded-lg text-xs font-semibold transition-all hover:opacity-80'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }}
+                          >
+                            {formatPrice(denom)}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Undo and Reset buttons */}
+                      <div className='flex gap-2 mb-3'>
+                        <button
+                          onClick={undoLastMarkBill}
+                          disabled={markBillHistory.length === 0}
+                          className='flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                            color: 'var(--color-text)',
+                          }}
+                        >
+                          Deshacer
+                        </button>
+                        <button
+                          onClick={resetMarkCash}
+                          disabled={markCashReceived === 0}
+                          className='flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                            color: 'var(--color-text)',
+                          }}
+                        >
+                          Reiniciar
+                        </button>
+                      </div>
+
+                      {/* Change display */}
+                      {markCashReceived >= selectedSale.total_amount && (
+                        <div
+                          className='p-3 rounded-lg'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                          }}
+                        >
+                          <div
+                            className='flex justify-between mb-2'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            <span>Cambio:</span>
+                            <span className='font-bold'>
+                              {formatPrice(markChange)}
+                            </span>
+                          </div>
+                          {markChangeBreakdown && markChange > 0 && (
+                            <div className='flex flex-wrap gap-1'>
+                              {markChangeBreakdown.map((b, idx) => (
+                                <span
+                                  key={idx}
+                                  className='text-xs px-2 py-1 rounded'
+                                  style={{
+                                    backgroundColor: 'var(--color-accent)',
+                                    color: 'var(--color-on-accent)',
+                                  }}
+                                >
+                                  {b.quantity}x {formatPrice(b.bill_value)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {!markChangeBreakdown && markChange > 0 && (
+                            <div
+                              className='text-xs text-center opacity-70'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              No se puede dar cambio exacto
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Confirm Button */}
+                  <button
+                    onClick={handleMarkAsPaid}
+                    disabled={!canMarkAsPaid()}
+                    className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed'
+                    style={{
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }}
+                  >
+                    Confirmar Pago
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className='text-center text-gray-400 py-12'>

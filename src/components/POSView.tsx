@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from 'react';
 import {
   X,
   Trash2,
@@ -17,6 +23,8 @@ import {
   User,
   Home,
   Truck,
+  DollarSign,
+  Smartphone,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -347,7 +355,7 @@ export function POSView() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<
-    'cash' | 'online' | 'card' | 'on_delivery'
+    'cash' | 'online' | 'card' | 'on_delivery' | 'unpaid'
   >('cash');
   const [cashReceived, setCashReceived] = useState(0);
   const [changeBreakdown, setChangeBreakdown] = useState<
@@ -385,6 +393,17 @@ export function POSView() {
   // KDS address editing state
   const [kdsEditingAddress, setKdsEditingAddress] = useState<string | null>(
     null
+  );
+
+  // KDS mark as paid state
+  const [kdsMarkingPaid, setKdsMarkingPaid] = useState<string | null>(null); // sale_number
+  const [kdsMarkPaymentMethod, setKdsMarkPaymentMethod] = useState<
+    'cash' | 'online' | 'card' | 'on_delivery'
+  >('cash');
+  const [kdsMarkCashReceived, setKdsMarkCashReceived] = useState(0);
+  const [kdsMarkBillHistory, setKdsMarkBillHistory] = useState<number[]>([]);
+  const [kdsUnpaidSales, setKdsUnpaidSales] = useState<Record<string, Sale>>(
+    {}
   );
   const [kdsAddressValue, setKdsAddressValue] = useState('');
 
@@ -1638,6 +1657,118 @@ export function POSView() {
     }
   };
 
+  // Send order without payment
+  const sendUnpaid = async () => {
+    if (cart.length === 0) return;
+
+    setProcessing(true);
+    try {
+      // Build items array, expanding combos into individual products
+      const items: {
+        product_id: string;
+        product_name: string;
+        product_price: number;
+        production_cost: number;
+        quantity: number;
+        removedIngredients: string[];
+        combo_name?: string;
+      }[] = [];
+
+      for (const cartItem of cart) {
+        if (cartItem.isCombo && cartItem.comboSelections) {
+          for (let q = 0; q < cartItem.quantity; q++) {
+            for (const selection of cartItem.comboSelections) {
+              items.push({
+                product_id: selection.productId,
+                product_name: selection.productName,
+                product_price: selection.productPrice,
+                production_cost: 0,
+                quantity: 1,
+                removedIngredients: selection.removedIngredients || [],
+                combo_name: cartItem.comboName,
+              });
+            }
+          }
+        } else {
+          items.push({
+            product_id: cartItem.id,
+            product_name: cartItem.name,
+            product_price: cartItem.price,
+            production_cost: cartItem.production_cost,
+            quantity: cartItem.quantity,
+            removedIngredients: cartItem.removedIngredients || [],
+          });
+        }
+      }
+
+      // Convert scheduled time to ISO format if set
+      let scheduledTimeISO: string | undefined;
+      if (scheduledTime) {
+        const today = new Date();
+        const [hours, minutes] = scheduledTime.split(':').map(Number);
+        today.setHours(hours, minutes, 0, 0);
+        if (today < new Date()) {
+          today.setDate(today.getDate() + 1);
+        }
+        scheduledTimeISO = today.toISOString();
+      }
+
+      const saleData = await createSale(
+        items,
+        'unpaid',
+        undefined,
+        undefined,
+        undefined,
+        scheduledTimeISO,
+        customerName || undefined,
+        orderType,
+        orderType === 'delivery' ? deliveryAddress || undefined : undefined
+      );
+
+      // Deduct stock for each item
+      for (const item of items) {
+        await deductMateriaPrimaStock(
+          item.product_id,
+          item.quantity,
+          item.removedIngredients
+        );
+      }
+
+      // Send to KDS if enabled
+      if (saleData) {
+        await sendToKDS(
+          saleData.sale_number,
+          items,
+          total,
+          scheduledTimeISO,
+          customerName,
+          orderType,
+          deliveryAddress
+        );
+      }
+
+      // Reset state
+      setCart([]);
+      setCashReceived(0);
+      setChangeBreakdown(null);
+      setShowPayment(false);
+      setPaymentMethod('cash');
+      setBillHistory([]);
+      setScheduledTime('');
+      setCustomerName('');
+      setOrderType('pickup');
+      setDeliveryAddress('');
+      setNextSaleNumber((prev) => (prev !== null ? prev + 1 : prev));
+
+      toast.success('¡Pedido enviado sin pago!');
+    } catch (error) {
+      console.error('Error sending unpaid order:', error);
+      toast.error('Error al enviar el pedido');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const cancelPayment = () => {
     setCashReceived(0);
     setChangeBreakdown(null);
@@ -1646,12 +1777,141 @@ export function POSView() {
     setBillHistory([]);
   };
 
+  // KDS Mark as Paid functions
+  const kdsMarkChange = useMemo(() => {
+    if (!kdsMarkingPaid) return 0;
+    const sale = kdsUnpaidSales[kdsMarkingPaid];
+    if (!sale) return 0;
+    return kdsMarkCashReceived - sale.total_amount;
+  }, [kdsMarkingPaid, kdsMarkCashReceived, kdsUnpaidSales]);
+
+  const kdsMarkChangeBreakdown = useMemo(() => {
+    if (kdsMarkChange <= 0) return null;
+    let remaining = kdsMarkChange;
+    const breakdown: { bill_value: number; quantity: number }[] = [];
+    for (const denom of BILLS.slice().reverse()) {
+      if (remaining >= denom) {
+        const count = Math.floor(remaining / denom);
+        breakdown.push({ bill_value: denom, quantity: count });
+        remaining = remaining % denom;
+      }
+    }
+    if (remaining > 0) return null;
+    return breakdown;
+  }, [kdsMarkChange]);
+
+  const addKdsMarkCash = (amount: number) => {
+    setKdsMarkCashReceived((prev) => prev + amount);
+    setKdsMarkBillHistory((prev) => [...prev, amount]);
+  };
+
+  const undoLastKdsMarkBill = () => {
+    if (kdsMarkBillHistory.length > 0) {
+      const lastBill = kdsMarkBillHistory[kdsMarkBillHistory.length - 1];
+      setKdsMarkCashReceived((prev) => prev - lastBill);
+      setKdsMarkBillHistory((prev) => prev.slice(0, -1));
+    }
+  };
+
+  const resetKdsMarkCash = () => {
+    setKdsMarkCashReceived(0);
+    setKdsMarkBillHistory([]);
+  };
+
+  const openKdsMarkPaidModal = (saleNumber: string) => {
+    setKdsMarkingPaid(saleNumber);
+    setKdsMarkPaymentMethod('cash');
+    setKdsMarkCashReceived(0);
+    setKdsMarkBillHistory([]);
+  };
+
+  const closeKdsMarkPaidModal = () => {
+    setKdsMarkingPaid(null);
+    setKdsMarkPaymentMethod('cash');
+    setKdsMarkCashReceived(0);
+    setKdsMarkBillHistory([]);
+  };
+
+  const canKdsMarkAsPaid = () => {
+    if (!kdsMarkingPaid) return false;
+    const sale = kdsUnpaidSales[kdsMarkingPaid];
+    if (!sale) return false;
+    if (kdsMarkPaymentMethod !== 'cash') return true;
+    if (kdsMarkCashReceived < sale.total_amount) return false;
+    if (kdsMarkChange > 0 && !kdsMarkChangeBreakdown) return false;
+    return true;
+  };
+
+  const handleKdsMarkAsPaid = async () => {
+    if (!kdsMarkingPaid || !canKdsMarkAsPaid()) return;
+
+    const sale = kdsUnpaidSales[kdsMarkingPaid];
+    if (!sale) return;
+
+    try {
+      const updates: Partial<Sale> = {
+        payment_method: kdsMarkPaymentMethod,
+      };
+
+      if (kdsMarkPaymentMethod === 'cash') {
+        updates.cash_received = kdsMarkCashReceived;
+        updates.change_given = kdsMarkChange;
+        if (kdsMarkChangeBreakdown) {
+          const billsChange: Record<string, number> = {};
+          kdsMarkChangeBreakdown.forEach((b) => {
+            billsChange[b.bill_value.toString()] = b.quantity;
+          });
+          updates.bills_change = billsChange;
+        }
+        const billsReceived: Record<string, number> = {};
+        kdsMarkBillHistory.forEach((bill) => {
+          billsReceived[bill.toString()] =
+            (billsReceived[bill.toString()] || 0) + 1;
+        });
+        updates.bills_received = billsReceived;
+      }
+
+      await updateSale(sale.id, updates);
+
+      // Update local tracking
+      setKdsUnpaidSales((prev) => {
+        const newState = { ...prev };
+        delete newState[kdsMarkingPaid];
+        return newState;
+      });
+
+      closeKdsMarkPaidModal();
+      toast.success('¡Pago registrado correctamente!');
+    } catch (error) {
+      console.error('Error marking sale as paid:', error);
+      toast.error('Error al registrar el pago');
+    }
+  };
+
+  // Load unpaid sales for KDS orders
+  useEffect(() => {
+    if (showKdsPanel && kdsOrders.length > 0) {
+      const saleNumbers = kdsOrders.map((o) => o.sale_number);
+      const unpaidMap: Record<string, Sale> = {};
+      sales.forEach((sale) => {
+        if (
+          saleNumbers.includes(sale.sale_number) &&
+          sale.payment_method === 'unpaid'
+        ) {
+          unpaidMap[sale.sale_number] = sale;
+        }
+      });
+      setKdsUnpaidSales(unpaidMap);
+    }
+  }, [showKdsPanel, kdsOrders, sales]);
+
   const canComplete = () => {
     if (cart.length === 0) return false;
     if (
       paymentMethod === 'online' ||
       paymentMethod === 'card' ||
-      paymentMethod === 'on_delivery'
+      paymentMethod === 'on_delivery' ||
+      paymentMethod === 'unpaid'
     )
       return true;
     if (paymentMethod === 'cash') {
@@ -2500,8 +2760,8 @@ export function POSView() {
                             }
                       }
                     >
-                      <CreditCard size={20} />
-                      Online
+                      <Smartphone size={20} />
+                      Transferencia
                     </button>
                     <button
                       onClick={() => setPaymentMethod('card')}
@@ -2537,7 +2797,7 @@ export function POSView() {
                       }
                     >
                       <Truck size={20} />
-                      Contra Entrega
+                      En Entrega
                     </button>
                   </div>
                 </div>
@@ -2704,6 +2964,17 @@ export function POSView() {
                     }}
                   >
                     {processing ? 'Procesando...' : 'Completar Venta'}
+                  </button>
+                  <button
+                    onClick={sendUnpaid}
+                    disabled={cart.length === 0 || processing}
+                    className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed'
+                    style={{
+                      backgroundColor: 'var(--color-accent)',
+                      color: 'var(--color-on-accent)',
+                    }}
+                  >
+                    {processing ? 'Procesando...' : 'Enviar Sin Pago'}
                   </button>
                   <button
                     onClick={cancelPayment}
@@ -3479,6 +3750,22 @@ export function POSView() {
                                 Marcar Entregado
                               </button>
                             )}
+                            {/* Mark as Paid button for unpaid orders */}
+                            {kdsUnpaidSales[order.sale_number] && (
+                              <button
+                                onClick={() =>
+                                  openKdsMarkPaidModal(order.sale_number)
+                                }
+                                className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
+                                style={{
+                                  backgroundColor: 'var(--color-accent)',
+                                  color: 'var(--color-on-accent)',
+                                }}
+                              >
+                                <DollarSign size={14} />
+                                Cobrar
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -3486,6 +3773,258 @@ export function POSView() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KDS Mark as Paid Modal */}
+      {kdsMarkingPaid && kdsUnpaidSales[kdsMarkingPaid] && (
+        <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+          <div
+            className='w-full max-w-md rounded-xl shadow-2xl overflow-hidden'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b'
+              style={{ borderColor: 'var(--color-background-accent)' }}
+            >
+              <div className='flex items-center gap-3'>
+                <DollarSign
+                  size={24}
+                  style={{ color: 'var(--color-primary)' }}
+                />
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Cobrar Pedido
+                </h2>
+              </div>
+              <button
+                onClick={closeKdsMarkPaidModal}
+                className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={20} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className='p-6'>
+              {/* Order info */}
+              <div
+                className='mb-4 p-3 rounded-lg'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <div
+                  className='font-bold mb-1'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Pedido #{kdsMarkingPaid}
+                </div>
+                <div
+                  className='text-2xl font-bold'
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {formatPrice(kdsUnpaidSales[kdsMarkingPaid].total_amount)}
+                </div>
+              </div>
+
+              {/* Payment Method Selector */}
+              <div className='grid grid-cols-2 gap-2 mb-4'>
+                <button
+                  onClick={() => setKdsMarkPaymentMethod('cash')}
+                  className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                  style={
+                    kdsMarkPaymentMethod === 'cash'
+                      ? {
+                          backgroundColor: 'var(--color-primary)',
+                          color: 'var(--color-on-primary)',
+                        }
+                      : {
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                        }
+                  }
+                >
+                  <Banknote size={16} />
+                  Efectivo
+                </button>
+                <button
+                  onClick={() => setKdsMarkPaymentMethod('online')}
+                  className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                  style={
+                    kdsMarkPaymentMethod === 'online'
+                      ? {
+                          backgroundColor: 'var(--color-primary)',
+                          color: 'var(--color-on-primary)',
+                        }
+                      : {
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                        }
+                  }
+                >
+                  <Smartphone size={16} />
+                  Transferencia
+                </button>
+                <button
+                  onClick={() => setKdsMarkPaymentMethod('card')}
+                  className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                  style={
+                    kdsMarkPaymentMethod === 'card'
+                      ? {
+                          backgroundColor: 'var(--color-primary)',
+                          color: 'var(--color-on-primary)',
+                        }
+                      : {
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                        }
+                  }
+                >
+                  <CreditCard size={16} />
+                  Tarjeta
+                </button>
+                <button
+                  onClick={() => setKdsMarkPaymentMethod('on_delivery')}
+                  className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
+                  style={
+                    kdsMarkPaymentMethod === 'on_delivery'
+                      ? {
+                          backgroundColor: 'var(--color-primary)',
+                          color: 'var(--color-on-primary)',
+                        }
+                      : {
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                        }
+                  }
+                >
+                  <Truck size={16} />
+                  En Entrega
+                </button>
+              </div>
+
+              {/* Cash Calculator */}
+              {kdsMarkPaymentMethod === 'cash' && (
+                <div className='mb-4'>
+                  <div className='flex items-center justify-between mb-2'>
+                    <span
+                      className='text-sm'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Efectivo Recibido:
+                    </span>
+                    <span
+                      className='font-bold'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {formatPrice(kdsMarkCashReceived)}
+                    </span>
+                  </div>
+
+                  <div className='grid grid-cols-5 gap-2 mb-3'>
+                    {BILLS.slice()
+                      .reverse()
+                      .map((denom) => (
+                        <button
+                          key={denom}
+                          onClick={() => addKdsMarkCash(denom)}
+                          className='py-2 rounded-lg text-xs font-semibold transition-all hover:opacity-80'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                            color: 'var(--color-text)',
+                          }}
+                        >
+                          {formatPrice(denom)}
+                        </button>
+                      ))}
+                  </div>
+
+                  <div className='flex gap-2 mb-3'>
+                    <button
+                      onClick={undoLastKdsMarkBill}
+                      disabled={kdsMarkBillHistory.length === 0}
+                      className='flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                      }}
+                    >
+                      Deshacer
+                    </button>
+                    <button
+                      onClick={resetKdsMarkCash}
+                      disabled={kdsMarkCashReceived === 0}
+                      className='flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                      }}
+                    >
+                      Reiniciar
+                    </button>
+                  </div>
+
+                  {kdsMarkCashReceived >=
+                    kdsUnpaidSales[kdsMarkingPaid].total_amount && (
+                    <div
+                      className='p-3 rounded-lg'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                      }}
+                    >
+                      <div
+                        className='flex justify-between mb-2'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span>Cambio:</span>
+                        <span className='font-bold'>
+                          {formatPrice(kdsMarkChange)}
+                        </span>
+                      </div>
+                      {kdsMarkChangeBreakdown && kdsMarkChange > 0 && (
+                        <div className='flex flex-wrap gap-1'>
+                          {kdsMarkChangeBreakdown.map((b, idx) => (
+                            <span
+                              key={idx}
+                              className='text-xs px-2 py-1 rounded'
+                              style={{
+                                backgroundColor: 'var(--color-accent)',
+                                color: 'var(--color-on-accent)',
+                              }}
+                            >
+                              {b.quantity}x {formatPrice(b.bill_value)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {!kdsMarkChangeBreakdown && kdsMarkChange > 0 && (
+                        <div
+                          className='text-xs text-center opacity-70'
+                          style={{ color: 'var(--color-text)' }}
+                        >
+                          No se puede dar cambio exacto
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Confirm Button */}
+              <button
+                onClick={handleKdsMarkAsPaid}
+                disabled={!canKdsMarkAsPaid()}
+                className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed'
+                style={{
+                  backgroundColor: 'var(--color-primary)',
+                  color: 'var(--color-on-primary)',
+                }}
+              >
+                Confirmar Pago
+              </button>
             </div>
           </div>
         </div>

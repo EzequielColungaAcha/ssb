@@ -39,7 +39,7 @@ export interface Sale {
   id: string;
   sale_number: string;
   total_amount: number;
-  payment_method: 'cash' | 'online' | 'card' | 'on_delivery';
+  payment_method: 'cash' | 'online' | 'card' | 'on_delivery' | 'unpaid';
   cash_received?: number;
   change_given?: number;
   bills_received?: Record<string, number>;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db, Sale, SaleItem, Product } from '../lib/indexeddb';
 
 export function useSales() {
@@ -123,15 +123,22 @@ export function useSales() {
     }
   };
 
-  const getSaleItems = async (saleId: string): Promise<SaleItem[]> => {
-    try {
-      await db.init();
-      return await db.getAllByIndex<SaleItem>('sale_items', 'sale_id', saleId);
-    } catch (error) {
-      console.error('Error loading sale items:', error);
-      return [];
-    }
-  };
+  const getSaleItems = useCallback(
+    async (saleId: string): Promise<SaleItem[]> => {
+      try {
+        await db.init();
+        return await db.getAllByIndex<SaleItem>(
+          'sale_items',
+          'sale_id',
+          saleId
+        );
+      } catch (error) {
+        console.error('Error loading sale items:', error);
+        return [];
+      }
+    },
+    []
+  );
 
   const getSaleById = async (saleId: string): Promise<Sale | null> => {
     try {
