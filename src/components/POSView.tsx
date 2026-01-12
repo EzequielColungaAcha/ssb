@@ -954,20 +954,27 @@ export function POSView() {
   };
 
   const fetchKdsOrders = useCallback(async () => {
-    if (!kdsEnabled || !kdsUrl) {
+    // Read settings directly from IndexedDB to ensure we have the latest
+    await db.init();
+    const settings = await db.get<AppSettings>('app_settings', 'default');
+
+    const effectiveKdsEnabled = settings?.kds_enabled || false;
+    const effectiveKdsUrl = settings?.kds_url || '';
+
+    if (!effectiveKdsEnabled || !effectiveKdsUrl) {
       console.log('fetchKdsOrders: skipped (disabled or no URL)', {
-        kdsEnabled,
-        kdsUrl,
+        kdsEnabled: effectiveKdsEnabled,
+        kdsUrl: effectiveKdsUrl,
       });
       return;
     }
 
-    console.log('fetchKdsOrders: fetching from', kdsUrl);
+    console.log('fetchKdsOrders: fetching from', effectiveKdsUrl);
 
     try {
       // Fetch pending and on_delivery orders
       const response = await fetch(
-        `${kdsUrl}/api/orders?status=pending,on_delivery`
+        `${effectiveKdsUrl}/api/orders?status=pending,on_delivery`
       );
       if (response.ok) {
         const data = await response.json();
@@ -1031,12 +1038,22 @@ export function POSView() {
       console.error('Error fetching KDS orders:', error);
       toast.error('Error de conexión con KDS');
     }
-  }, [kdsEnabled, kdsUrl]);
+  }, []);
 
   // WebSocket connection for real-time KDS updates
-  const connectKdsWebSocket = useCallback(() => {
-    if (!kdsEnabled || !kdsUrl) {
-      console.log('KDS WebSocket: disabled or no URL', { kdsEnabled, kdsUrl });
+  const connectKdsWebSocket = useCallback(async () => {
+    // Read settings directly from IndexedDB
+    await db.init();
+    const settings = await db.get<AppSettings>('app_settings', 'default');
+
+    const effectiveKdsEnabled = settings?.kds_enabled || false;
+    const effectiveKdsUrl = settings?.kds_url || '';
+
+    if (!effectiveKdsEnabled || !effectiveKdsUrl) {
+      console.log('KDS WebSocket: disabled or no URL', {
+        kdsEnabled: effectiveKdsEnabled,
+        kdsUrl: effectiveKdsUrl,
+      });
       return;
     }
 
@@ -1046,7 +1063,7 @@ export function POSView() {
     }
 
     // Convert HTTP URL to WebSocket URL
-    const wsUrl = kdsUrl.replace(/^http/, 'ws');
+    const wsUrl = effectiveKdsUrl.replace(/^http/, 'ws');
     console.log('KDS WebSocket: connecting to', wsUrl);
     setKdsConnectionStatus('connecting');
 
@@ -1147,7 +1164,7 @@ export function POSView() {
     } catch (error) {
       console.error('Error creating KDS WebSocket:', error);
     }
-  }, [kdsEnabled, kdsUrl, showKdsPanel]);
+  }, [showKdsPanel]);
 
   const updateKdsOrderStatus = async (
     orderId: string,
@@ -2164,8 +2181,8 @@ export function POSView() {
 
   // KDS WebSocket and polling when panel is open
   useEffect(() => {
-    if (showKdsPanel && kdsEnabled && kdsUrl) {
-      // Initial fetch
+    if (showKdsPanel) {
+      // Initial fetch - functions check settings from IndexedDB
       fetchKdsOrders();
 
       // Connect WebSocket for real-time updates
@@ -2194,7 +2211,7 @@ export function POSView() {
         kdsWsReconnectRef.current = null;
       }
     };
-  }, [showKdsPanel, kdsEnabled, kdsUrl, fetchKdsOrders, connectKdsWebSocket]);
+  }, [showKdsPanel, fetchKdsOrders, connectKdsWebSocket]);
 
   return (
     <DndContext
