@@ -1035,8 +1035,10 @@ export function POSView() {
         toast.error(`Error al cargar pedidos: ${response.status}`);
       }
     } catch (error) {
-      console.error('Error fetching KDS orders:', error);
-      toast.error('Error de conexión con KDS');
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      console.error('Error fetching KDS orders:', errorMessage, error);
+      toast.error(`Error de conexión con KDS: ${errorMessage}`);
     }
   }, []);
 
