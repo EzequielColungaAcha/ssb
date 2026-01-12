@@ -4,7 +4,7 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
-  base: '/ssb/',
+  base: process.env.LOCAL_DEPLOY ? '/' : '/ssb/',
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
