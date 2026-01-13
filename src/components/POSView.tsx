@@ -530,7 +530,7 @@ export function POSView() {
     { name: string; removed: boolean }[]
   >([]);
 
-  const activeCombos = combos.filter((c) => c.active);
+  const activeCombos = useMemo(() => combos.filter((c) => c.active), [combos]);
 
   // State for sorted combos (for drag and drop)
   const [sortedCombos, setSortedCombos] = useState<Combo[]>([]);
