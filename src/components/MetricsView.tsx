@@ -184,9 +184,12 @@ export function MetricsView() {
 
     setFilteredSaleItems(dateAndCategoryFilteredItems);
 
-    // Filter out items that are combos (match a combo name) for product stats
-    const itemsWithoutCombos = dateAndCategoryFilteredItems.filter(
-      (item: SaleItem) => !comboNames.has(item.product_name)
+    // Separate combo items and regular items
+    const regularItems = dateAndCategoryFilteredItems.filter(
+      (item: SaleItem) => !item.combo_name
+    );
+    const comboItems = dateAndCategoryFilteredItems.filter(
+      (item: SaleItem) => item.combo_name
     );
 
     const productSales: {
@@ -195,7 +198,8 @@ export function MetricsView() {
     let profit = 0;
     let revenue = 0;
 
-    itemsWithoutCombos.forEach((item: SaleItem) => {
+    // Process regular items
+    regularItems.forEach((item: SaleItem) => {
       if (!productSales[item.product_name]) {
         productSales[item.product_name] = {
           quantity: 0,
@@ -210,6 +214,56 @@ export function MetricsView() {
       productSales[item.product_name].profit += itemProfit;
       profit += itemProfit;
       revenue += item.subtotal;
+    });
+
+    // Process combo items - include individual product values
+    // Track combo instances for calculating the combo discount/adjustment
+    const processedComboInstances = new Set<string>();
+    const comboInstanceData = new Map<
+      string,
+      { comboPrice: number; productsTotal: number; productionCost: number }
+    >();
+
+    // First pass: collect data for each combo instance
+    comboItems.forEach((item: SaleItem) => {
+      const instanceId = item.combo_instance_id || item.id;
+      const existing = comboInstanceData.get(instanceId) || {
+        comboPrice: item.combo_unit_price || 0,
+        productsTotal: 0,
+        productionCost: 0,
+      };
+      existing.productsTotal += item.product_price * item.quantity;
+      existing.productionCost += (item.production_cost || 0) * item.quantity;
+      comboInstanceData.set(instanceId, existing);
+    });
+
+    // Second pass: add to product stats and totals
+    comboItems.forEach((item: SaleItem) => {
+      const instanceId = item.combo_instance_id || item.id;
+
+      // Add combo product to product stats with individual values
+      if (!productSales[item.product_name]) {
+        productSales[item.product_name] = {
+          quantity: 0,
+          revenue: 0,
+          profit: 0,
+        };
+      }
+      const itemProfit =
+        (item.product_price - (item.production_cost || 0)) * item.quantity;
+      productSales[item.product_name].quantity += item.quantity;
+      productSales[item.product_name].revenue += item.product_price * item.quantity;
+      productSales[item.product_name].profit += itemProfit;
+
+      // Add to totals only once per combo instance
+      if (!processedComboInstances.has(instanceId)) {
+        processedComboInstances.add(instanceId);
+        const instanceData = comboInstanceData.get(instanceId)!;
+        // Revenue is the combo price (what customer actually paid)
+        revenue += instanceData.comboPrice;
+        // Profit is combo price minus total production cost
+        profit += instanceData.comboPrice - instanceData.productionCost;
+      }
     });
 
     setTotalProfit(profit);

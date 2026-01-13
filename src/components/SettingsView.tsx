@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Upload, X, Settings, Monitor } from 'lucide-react';
+import { Palette, Type, Upload, X, Settings, Monitor, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLogo } from '../contexts/LogoContext';
@@ -40,8 +40,22 @@ export function SettingsView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [kdsEnabled, setKdsEnabled] = useState(false);
   const [kdsUrl, setKdsUrl] = useState('http://192.168.1.100:3001');
-  const [hasLoaded, setHasLoaded] = useState(false);
+  const [deliveryCharge, setDeliveryCharge] = useState<number>(0);
+  const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState<number>(0);
+  const [isInitialized, setIsInitialized] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasLoadedRef = useRef(false);
+
+  // Store initial values to detect actual changes
+  const initialValuesRef = useRef<{
+    colors: typeof themeConfig;
+    acronym: string;
+    logoImage?: string;
+    kdsEnabled: boolean;
+    kdsUrl: string;
+    deliveryCharge: number;
+    freeDeliveryThreshold: number;
+  } | null>(null);
 
   // Store functions in refs to avoid dependency issues
   const updateThemeConfigRef = useRef(updateThemeConfig);
@@ -53,34 +67,79 @@ export function SettingsView() {
 
   useEffect(() => {
     setColors(themeConfig);
-  }, [themeConfig]);
+    // Update initial values if they were already captured with different theme values
+    if (initialValuesRef.current && !isInitialized) {
+      initialValuesRef.current = {
+        ...initialValuesRef.current,
+        colors: themeConfig,
+      };
+    }
+  }, [themeConfig, isInitialized]);
 
   useEffect(() => {
     setAcronym(logoConfig.acronym);
     setLogoImage(logoConfig.logo_image);
-  }, [logoConfig]);
+    // Update initial values if they were already captured with different logo values
+    if (initialValuesRef.current && !isInitialized) {
+      initialValuesRef.current = {
+        ...initialValuesRef.current,
+        acronym: logoConfig.acronym,
+        logoImage: logoConfig.logo_image,
+      };
+    }
+  }, [logoConfig, isInitialized]);
 
   useEffect(() => {
-    const loadKdsSettings = async () => {
+    // Only load once
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+
+    const loadSettings = async () => {
       try {
         await db.init();
         const settings = await db.get<AppSettings>('app_settings', 'default');
-        if (settings) {
-          setKdsEnabled(settings.kds_enabled || false);
-          setKdsUrl(settings.kds_url || 'http://192.168.1.100:3001');
-        }
+        const loadedKdsEnabled = settings?.kds_enabled || false;
+        const loadedKdsUrl = settings?.kds_url || 'http://192.168.1.100:3001';
+        const loadedDeliveryCharge = settings?.delivery_charge || 0;
+        const loadedFreeDeliveryThreshold = settings?.free_delivery_threshold || 0;
+        
+        setKdsEnabled(loadedKdsEnabled);
+        setKdsUrl(loadedKdsUrl);
+        setDeliveryCharge(loadedDeliveryCharge);
+        setFreeDeliveryThreshold(loadedFreeDeliveryThreshold);
+
+        // Store initial values after React has processed state updates
+        setTimeout(() => {
+          initialValuesRef.current = {
+            colors: themeConfig,
+            acronym: logoConfig.acronym,
+            logoImage: logoConfig.logo_image,
+            kdsEnabled: loadedKdsEnabled,
+            kdsUrl: loadedKdsUrl,
+            deliveryCharge: loadedDeliveryCharge,
+            freeDeliveryThreshold: loadedFreeDeliveryThreshold,
+          };
+          setIsInitialized(true);
+        }, 150);
       } catch (error) {
-        console.error('Error loading KDS settings:', error);
+        console.error('Error loading settings:', error);
+        // Still set initialized even on error
+        setTimeout(() => setIsInitialized(true), 150);
       }
-      // Small delay to let other effects settle before enabling auto-save
-      setTimeout(() => setHasLoaded(true), 100);
     };
-    loadKdsSettings();
+    loadSettings();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-save with debounce
   useEffect(() => {
-    if (!hasLoaded) return;
+    // Don't save until initialized and initial values are captured
+    if (!isInitialized || !initialValuesRef.current) return;
+
+    // Check if any values have changed from initial
+    const currentValues = { colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold };
+    const hasChanges = JSON.stringify(currentValues) !== JSON.stringify(initialValuesRef.current);
+    if (!hasChanges) return;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -106,6 +165,8 @@ export function SettingsView() {
           ...existingSettings,
           kds_enabled: kdsEnabled,
           kds_url: kdsUrl,
+          delivery_charge: deliveryCharge,
+          free_delivery_threshold: freeDeliveryThreshold,
           updated_at: new Date().toISOString(),
         };
 
@@ -115,6 +176,11 @@ export function SettingsView() {
         if (kdsEnabled && kdsUrl) {
           await syncThemeToKDS(colors, theme);
         }
+
+        // Update initial values ref after successful save
+        initialValuesRef.current = { colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold };
+        
+        toast.success(t.settings.successSaving);
       } catch (error) {
         console.error('Error saving settings:', error);
         toast.error(t.settings.errorSaving);
@@ -128,7 +194,7 @@ export function SettingsView() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [hasLoaded, colors, acronym, logoImage, kdsEnabled, kdsUrl]);
+  }, [isInitialized, colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold, syncThemeToKDS, theme]);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -208,7 +274,7 @@ export function SettingsView() {
 
   return (
     <div className='p-6'>
-      <div className='mb-6'>
+      <div className='mb-6 relative'>
         <h1
           className='text-3xl font-bold flex items-center gap-3'
           style={{ color: 'var(--color-text)' }}
@@ -220,6 +286,15 @@ export function SettingsView() {
           Personalizá la apariencia y configuración de tu sistema de punto de
           venta
         </p>
+        <span
+          className='absolute top-0 right-0 px-3 py-1 rounded-full text-xs font-semibold'
+          style={{
+            backgroundColor: 'var(--color-background-accent)',
+            color: 'var(--color-text)',
+          }}
+        >
+          v{__APP_VERSION__}
+        </span>
       </div>
 
       <Card className='mb-6'>
@@ -337,6 +412,51 @@ export function SettingsView() {
               </p>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className='my-6'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <Truck size={24} />
+            Configuración de Delivery
+          </CardTitle>
+          <CardDescription>
+            Configurá el costo de envío y el monto mínimo para envío gratis
+          </CardDescription>
+        </CardHeader>
+        <CardContent className='space-y-4'>
+          <div>
+            <Label htmlFor='delivery-charge'>Cargo por Delivery</Label>
+            <Input
+              id='delivery-charge'
+              type='number'
+              min='0'
+              value={deliveryCharge}
+              onChange={(e) => setDeliveryCharge(Number(e.target.value) || 0)}
+              placeholder='500'
+              className='mt-2'
+            />
+            <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+              Monto fijo que se agrega al total cuando el pedido es delivery
+            </p>
+          </div>
+
+          <div>
+            <Label htmlFor='free-delivery-threshold'>Monto mínimo para Delivery Gratis</Label>
+            <Input
+              id='free-delivery-threshold'
+              type='number'
+              min='0'
+              value={freeDeliveryThreshold}
+              onChange={(e) => setFreeDeliveryThreshold(Number(e.target.value) || 0)}
+              placeholder='10000'
+              className='mt-2'
+            />
+            <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+              Si el subtotal del carrito supera este monto, el delivery es gratis. Dejá en 0 para desactivar.
+            </p>
+          </div>
         </CardContent>
       </Card>
 

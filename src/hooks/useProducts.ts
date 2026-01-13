@@ -74,16 +74,24 @@ export function useProducts() {
     }
   };
 
-  const updateStock = async (id: string, quantity: number) => {
-    const product = products.find((p) => p.id === id);
+  const updateStock = async (id: string, delta: number) => {
+    // Read current stock from database to avoid stale state issues
+    await db.init();
+    const product = await db.get<Product>('products', id);
     if (!product) return;
 
-    const newStock = product.stock + quantity;
+    const newStock = product.stock + delta;
     if (newStock < 0) {
       throw new Error('Insufficient stock');
     }
 
-    await updateProduct(id, { stock: newStock });
+    // Update directly without triggering loadProducts (caller should refresh after all updates)
+    const updated: Product = {
+      ...product,
+      stock: newStock,
+      updated_at: new Date().toISOString(),
+    };
+    await db.put('products', updated);
   };
 
   return {

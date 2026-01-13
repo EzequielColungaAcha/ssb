@@ -47,7 +47,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Product, db, AppSettings, Sale, Combo } from '../lib/indexeddb';
+import { Product, db, AppSettings, Sale, Combo, MateriaPrima } from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
@@ -104,6 +104,7 @@ interface SortableProductItemProps {
   onLongPress: (product: Product) => void;
   getStock: (product: Product) => number;
   hasRemovableIngredients: boolean;
+  isOutOfStock: boolean;
 }
 
 function SortableProductItem({
@@ -113,6 +114,7 @@ function SortableProductItem({
   onLongPress,
   getStock,
   hasRemovableIngredients,
+  isOutOfStock,
 }: SortableProductItemProps) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPress = useRef(false);
@@ -171,12 +173,16 @@ function SortableProductItem({
       {...(isLocked ? {} : { ...attributes, ...listeners })}
     >
       <button
-        onPointerDown={isLocked ? handlePointerDown : undefined}
-        onPointerUp={isLocked ? handlePointerUp : undefined}
-        onPointerLeave={isLocked ? handlePointerLeave : undefined}
-        onClick={isLocked ? undefined : () => onAddToCart(product)}
+        onContextMenu={(e) => e.preventDefault()}
+        onPointerDown={isLocked && !isOutOfStock ? handlePointerDown : undefined}
+        onPointerUp={isLocked && !isOutOfStock ? handlePointerUp : undefined}
+        onPointerLeave={isLocked && !isOutOfStock ? handlePointerLeave : undefined}
+        onClick={isLocked && !isOutOfStock ? undefined : !isOutOfStock ? () => onAddToCart(product) : undefined}
+        disabled={isOutOfStock}
         className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 relative ${
-          isLocked
+          isOutOfStock
+            ? 'opacity-50 cursor-not-allowed'
+            : isLocked
             ? 'hover:shadow-xl hover:scale-105 select-none'
             : 'cursor-move'
         }`}
@@ -185,7 +191,18 @@ function SortableProductItem({
           color: 'var(--color-on-primary)',
         }}
       >
-        {hasRemovableIngredients && (
+        {isOutOfStock && (
+          <div
+            className='absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold'
+            style={{
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              color: 'white',
+            }}
+          >
+            SIN STOCK
+          </div>
+        )}
+        {hasRemovableIngredients && !isOutOfStock && (
           <div
             className='absolute top-2 right-2 p-1 rounded-md opacity-80'
             style={{ backgroundColor: 'var(--color-on-primary)' }}
@@ -210,12 +227,14 @@ interface SortableComboItemProps {
   combo: Combo;
   isLocked: boolean;
   onOpenComboModal: (combo: Combo) => void;
+  isOutOfStock: boolean;
 }
 
 function SortableComboItem({
   combo,
   isLocked,
   onOpenComboModal,
+  isOutOfStock,
 }: SortableComboItemProps) {
   const {
     attributes,
@@ -245,9 +264,12 @@ function SortableComboItem({
       {...(isLocked ? {} : { ...attributes, ...listeners })}
     >
       <button
-        onClick={isLocked ? () => onOpenComboModal(combo) : undefined}
+        onClick={isLocked && !isOutOfStock ? () => onOpenComboModal(combo) : undefined}
+        disabled={isOutOfStock}
         className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 text-left relative ${
-          isLocked
+          isOutOfStock
+            ? 'opacity-50 cursor-not-allowed'
+            : isLocked
             ? 'hover:shadow-xl hover:scale-105 select-none'
             : 'cursor-move'
         }`}
@@ -256,6 +278,17 @@ function SortableComboItem({
           color: 'var(--color-on-accent)',
         }}
       >
+        {isOutOfStock && (
+          <div
+            className='absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold z-10'
+            style={{
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              color: 'white',
+            }}
+          >
+            SIN STOCK
+          </div>
+        )}
         <div className='text-lg font-bold mb-2'>{combo.name}</div>
         <div className='text-2xl font-bold mb-1'>
           {combo.price_type === 'fixed'
@@ -331,7 +364,7 @@ function SortableCategory({
 }
 
 export function POSView() {
-  const { products, refresh: refreshProducts, updateProduct } = useProducts();
+  const { products, refresh: refreshProducts, updateProduct, updateStock } = useProducts();
   const { sales, createSale, updateSale } = useSales();
   const { calculateOptimalChange, processChange, processCashReceived } =
     useCashDrawer();
@@ -373,6 +406,8 @@ export function POSView() {
   const [nextSaleNumber, setNextSaleNumber] = useState<number | null>(null);
   const [kdsEnabled, setKdsEnabled] = useState(false);
   const [kdsUrl, setKdsUrl] = useState('');
+  const [deliveryChargeAmount, setDeliveryChargeAmount] = useState(0);
+  const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showKdsPanel, setShowKdsPanel] = useState(false);
   const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
@@ -426,6 +461,49 @@ export function POSView() {
   // Scheduled time for order
   const [scheduledTime, setScheduledTime] = useState<string>('');
 
+  // Time validation helper
+  const isValidTime = useCallback((time: string): boolean => {
+    if (!time) return true; // Empty is valid (optional)
+    const match = time.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return false;
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+  }, []);
+
+  // Format and validate time input
+  const handleTimeChange = useCallback((value: string) => {
+    // Remove non-digits
+    let digits = value.replace(/[^0-9]/g, '');
+
+    // Limit to 4 digits
+    if (digits.length > 4) digits = digits.slice(0, 4);
+
+    // Auto-format with colon
+    let formatted = digits;
+    if (digits.length > 2) {
+      formatted = digits.slice(0, 2) + ':' + digits.slice(2);
+    }
+
+    // Validate and clamp values
+    if (digits.length >= 2) {
+      let hours = parseInt(digits.slice(0, 2), 10);
+      if (hours > 23) hours = 23;
+      const hoursStr = hours.toString().padStart(2, '0');
+
+      if (digits.length > 2) {
+        let minutes = parseInt(digits.slice(2), 10);
+        if (digits.length === 4 && minutes > 59) minutes = 59;
+        const minutesStr = minutes.toString().padStart(digits.length - 2, '0');
+        formatted = hoursStr + ':' + minutesStr;
+      } else {
+        formatted = hoursStr;
+      }
+    }
+
+    setScheduledTime(formatted);
+  }, []);
+
   // Customer info for order
   const [customerName, setCustomerName] = useState<string>('');
   const [orderType, setOrderType] = useState<'pickup' | 'delivery'>('pickup');
@@ -456,6 +534,11 @@ export function POSView() {
 
   // State for sorted combos (for drag and drop)
   const [sortedCombos, setSortedCombos] = useState<Combo[]>([]);
+
+  // Track combo stock availability
+  const [comboStockStatus, setComboStockStatus] = useState<
+    Record<string, boolean>
+  >({});
 
   // Track which products have removable ingredients
   const [
@@ -496,6 +579,8 @@ export function POSView() {
         }
         setKdsEnabled(settings.kds_enabled || false);
         setKdsUrl(settings.kds_url || '');
+        setDeliveryChargeAmount(settings.delivery_charge || 0);
+        setFreeDeliveryThreshold(settings.free_delivery_threshold || 0);
         console.log('KDS Settings loaded:', {
           kdsEnabled: settings.kds_enabled,
           kdsUrl: settings.kds_url,
@@ -533,9 +618,7 @@ export function POSView() {
     return product.stock;
   };
 
-  const activeProducts = sortedProducts.filter(
-    (p) => p.active && getProductStock(p) > 0
-  );
+  const activeProducts = sortedProducts.filter((p) => p.active);
 
   const productCategories = Array.from(
     new Set(activeProducts.map((p) => p.category))
@@ -607,6 +690,8 @@ export function POSView() {
         },
       ];
     });
+
+    toast.success(`${product.name} agregado`);
   };
 
   // Handle long-press to open ingredient customization modal
@@ -752,33 +837,106 @@ export function POSView() {
   };
 
   // Confirm combo and add to cart
-  const confirmComboSelection = () => {
+  // Helper to create a signature for combo selections (for grouping identical combos)
+  const getComboSelectionsSignature = (
+    selections: ComboSelection[]
+  ): string => {
+    return selections
+      .map((s) => {
+        const removed = (s.removedIngredients || []).slice().sort().join(',');
+        return `${s.slotId}:${s.productId}:${removed}`;
+      })
+      .join('|');
+  };
+
+  const confirmComboSelection = async () => {
     if (!customizingCombo) return;
 
-    // Create a combo cart item
-    const comboCartItem: CartItem = {
-      id: customizingCombo.id,
-      name: customizingCombo.name,
-      price: comboPrice,
-      category: 'combos',
-      stock: 999,
-      active: true,
-      production_cost: 0,
-      uses_materia_prima: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      quantity: 1,
-      cartItemId: `combo_${Date.now()}_${Math.random()
-        .toString(36)
-        .substr(2, 9)}`,
-      removedIngredients: [],
-      isCombo: true,
-      comboId: customizingCombo.id,
-      comboName: customizingCombo.name,
-      comboSelections: comboSelections,
-    };
+    // Calculate stock requirements per product (including this new combo)
+    const stockRequirements = new Map<string, number>();
 
-    setCart((prev) => [...prev, comboCartItem]);
+    // Add requirements from the new combo being added
+    for (const selection of comboSelections) {
+      const current = stockRequirements.get(selection.productId) || 0;
+      stockRequirements.set(selection.productId, current + 1);
+    }
+
+    // Add requirements from existing cart items
+    for (const cartItem of cart) {
+      if (cartItem.isCombo && cartItem.comboSelections) {
+        for (const sel of cartItem.comboSelections) {
+          const current = stockRequirements.get(sel.productId) || 0;
+          stockRequirements.set(sel.productId, current + cartItem.quantity);
+        }
+      } else if (!cartItem.isCombo) {
+        const current = stockRequirements.get(cartItem.id) || 0;
+        stockRequirements.set(cartItem.id, current + cartItem.quantity);
+      }
+    }
+
+    // Validate stock for each product
+    for (const [productId, required] of stockRequirements) {
+      const product = products.find((p) => p.id === productId);
+      if (!product) continue;
+
+      const available = product.uses_materia_prima
+        ? await calculateAvailableStock(productId)
+        : product.stock;
+
+      if (required > available) {
+        toast.error('Stock insuficiente');
+        return;
+      }
+    }
+
+    // Create signature for the new combo
+    const newSignature = getComboSelectionsSignature(comboSelections);
+
+    // Check if identical combo already exists in cart
+    const existingCombo = cart.find(
+      (item) =>
+        item.isCombo &&
+        item.comboId === customizingCombo.id &&
+        item.comboSelections &&
+        getComboSelectionsSignature(item.comboSelections) === newSignature
+    );
+
+    if (existingCombo) {
+      // Increment quantity of existing combo
+      setCart((prev) =>
+        prev.map((item) =>
+          item.cartItemId === existingCombo.cartItemId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      );
+    } else {
+      // Create a new combo cart item
+      const comboCartItem: CartItem = {
+        id: customizingCombo.id,
+        name: customizingCombo.name,
+        price: comboPrice,
+        category: 'combos',
+        stock: 999,
+        active: true,
+        production_cost: 0,
+        uses_materia_prima: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        quantity: 1,
+        cartItemId: `combo_${Date.now()}_${Math.random()
+          .toString(36)
+          .substr(2, 9)}`,
+        removedIngredients: [],
+        isCombo: true,
+        comboId: customizingCombo.id,
+        comboName: customizingCombo.name,
+        comboSelections: comboSelections,
+      };
+
+      setCart((prev) => [...prev, comboCartItem]);
+    }
+
     toast.success(`${customizingCombo.name} agregado`);
 
     // Reset modal state
@@ -823,18 +981,64 @@ export function POSView() {
       return;
     }
 
-    const availableStock = getProductStock(cartItem);
+    // For combo items, validate stock of all component products
+    if (cartItem.isCombo && cartItem.comboSelections) {
+      // Only check if quantity is increasing
+      if (quantity > cartItem.quantity) {
+        // Calculate stock requirements including the new quantity
+        const stockRequirements = new Map<string, number>();
 
-    if (quantity > availableStock) {
-      toast.error('Stock insuficiente');
-      return;
-    }
+        // Add requirements from this combo with new quantity
+        for (const sel of cartItem.comboSelections) {
+          const current = stockRequirements.get(sel.productId) || 0;
+          stockRequirements.set(sel.productId, current + quantity);
+        }
 
-    if (cartItem.uses_materia_prima) {
-      const hasStock = await checkStockAvailability(cartItem.id);
-      if (!hasStock) {
-        toast.error('Materia prima insuficiente para esta cantidad');
+        // Add requirements from other cart items
+        for (const otherItem of cart) {
+          if (otherItem.cartItemId === cartItemId) continue; // Skip current item
+
+          if (otherItem.isCombo && otherItem.comboSelections) {
+            for (const sel of otherItem.comboSelections) {
+              const current = stockRequirements.get(sel.productId) || 0;
+              stockRequirements.set(sel.productId, current + otherItem.quantity);
+            }
+          } else if (!otherItem.isCombo) {
+            const current = stockRequirements.get(otherItem.id) || 0;
+            stockRequirements.set(otherItem.id, current + otherItem.quantity);
+          }
+        }
+
+        // Validate stock for each product
+        for (const [productId, required] of stockRequirements) {
+          const product = products.find((p) => p.id === productId);
+          if (!product) continue;
+
+          const available = product.uses_materia_prima
+            ? await calculateAvailableStock(productId)
+            : product.stock;
+
+          if (required > available) {
+            toast.error('Stock insuficiente');
+            return;
+          }
+        }
+      }
+    } else {
+      // Regular product stock check
+      const availableStock = getProductStock(cartItem);
+
+      if (quantity > availableStock) {
+        toast.error('Stock insuficiente');
         return;
+      }
+
+      if (cartItem.uses_materia_prima) {
+        const hasStock = await checkStockAvailability(cartItem.id);
+        if (!hasStock) {
+          toast.error('Materia prima insuficiente para esta cantidad');
+          return;
+        }
       }
     }
 
@@ -845,7 +1049,18 @@ export function POSView() {
     );
   };
 
-  const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const subtotal = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
+
+  // Calculate delivery charge
+  const isDeliveryFree =
+    freeDeliveryThreshold > 0 && subtotal >= freeDeliveryThreshold;
+  const currentDeliveryCharge =
+    orderType === 'delivery' && !isDeliveryFree ? deliveryChargeAmount : 0;
+  const total = subtotal + currentDeliveryCharge;
+
   const change = cashReceived - total;
 
   const addCash = (amount: number) => {
@@ -1534,13 +1749,23 @@ export function POSView() {
         quantity: number;
         removedIngredients: string[];
         combo_name?: string;
+        combo_instance_id?: string;
+        combo_slot_index?: number;
+        combo_unit_price?: number;
       }[] = [];
 
       for (const cartItem of cart) {
         if (cartItem.isCombo && cartItem.comboSelections) {
           // Expand combo into individual products for each quantity
           for (let q = 0; q < cartItem.quantity; q++) {
-            for (const selection of cartItem.comboSelections) {
+            // Generate unique instance ID for this combo instance
+            const comboInstanceId = `${cartItem.cartItemId}-${q}`;
+            for (
+              let selIndex = 0;
+              selIndex < cartItem.comboSelections.length;
+              selIndex++
+            ) {
+              const selection = cartItem.comboSelections[selIndex];
               items.push({
                 product_id: selection.productId,
                 product_name: selection.productName,
@@ -1549,6 +1774,9 @@ export function POSView() {
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
                 combo_name: cartItem.comboName,
+                combo_instance_id: comboInstanceId,
+                combo_slot_index: selIndex,
+                combo_unit_price: cartItem.price, // Store actual combo price
               });
             }
           }
@@ -1596,20 +1824,98 @@ export function POSView() {
         scheduledTimeISO,
         customerName || undefined,
         orderType,
-        orderType === 'delivery' ? deliveryAddress || undefined : undefined
+        orderType === 'delivery' ? deliveryAddress || undefined : undefined,
+        currentDeliveryCharge > 0 ? currentDeliveryCharge : undefined
       );
 
-      const materiaPrimaItems = cart.filter((item) => item.uses_materia_prima);
+      // Aggregate all stock deductions before applying
+      const productStockDeductions = new Map<string, number>();
+      const materiaPrimaDeductions = new Map<string, number>();
 
-      await Promise.all(
-        materiaPrimaItems.map((item) =>
-          deductMateriaPrimaStock(
+      // Helper to aggregate materia prima deductions for a product
+      const aggregateMateriaPrimaForProduct = async (
+        productId: string,
+        quantity: number,
+        removedIngredients?: string[]
+      ) => {
+        const links = await getProductMateriaPrima(productId);
+        for (const link of links) {
+          // Skip if this ingredient was removed
+          if (removedIngredients && removedIngredients.length > 0) {
+            const mp = materiaPrima.find((m) => m.id === link.materia_prima_id);
+            if (mp && removedIngredients.includes(mp.name)) {
+              continue;
+            }
+          }
+          const current = materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+          materiaPrimaDeductions.set(
+            link.materia_prima_id,
+            current + link.quantity * quantity
+          );
+        }
+      };
+
+      // Process regular cart items
+      for (const item of cart) {
+        if (item.isCombo) continue;
+
+        if (item.uses_materia_prima) {
+          await aggregateMateriaPrimaForProduct(
             item.id,
             item.quantity,
             item.removedIngredients
-          )
-        )
+          );
+        } else {
+          const current = productStockDeductions.get(item.id) || 0;
+          productStockDeductions.set(item.id, current + item.quantity);
+        }
+      }
+
+      // Process combo items
+      const comboItems = cart.filter(
+        (item) => item.isCombo && item.comboSelections
       );
+
+      for (const comboItem of comboItems) {
+        for (const selection of comboItem.comboSelections!) {
+          const product = products.find((p) => p.id === selection.productId);
+          if (!product) continue;
+
+          if (product.uses_materia_prima) {
+            await aggregateMateriaPrimaForProduct(
+              selection.productId,
+              comboItem.quantity,
+              selection.removedIngredients || []
+            );
+          } else {
+            const current = productStockDeductions.get(selection.productId) || 0;
+            productStockDeductions.set(
+              selection.productId,
+              current + comboItem.quantity
+            );
+          }
+        }
+      }
+
+      // Apply all product stock deductions
+      for (const [productId, quantity] of productStockDeductions) {
+        await updateStock(productId, -quantity);
+      }
+
+      // Apply all materia prima deductions
+      for (const [mpId, quantity] of materiaPrimaDeductions) {
+        const mp = await db.get<MateriaPrima>('materia_prima', mpId);
+        if (mp) {
+          const newStock = mp.stock - quantity;
+          if (newStock >= 0) {
+            await db.put('materia_prima', {
+              ...mp,
+              stock: newStock,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
 
       if (paymentMethod === 'cash' && saleData) {
         const billsReceivedData = await processCashReceived(
@@ -1691,12 +1997,21 @@ export function POSView() {
         quantity: number;
         removedIngredients: string[];
         combo_name?: string;
+        combo_instance_id?: string;
+        combo_slot_index?: number;
+        combo_unit_price?: number;
       }[] = [];
 
       for (const cartItem of cart) {
         if (cartItem.isCombo && cartItem.comboSelections) {
           for (let q = 0; q < cartItem.quantity; q++) {
-            for (const selection of cartItem.comboSelections) {
+            const comboInstanceId = `${cartItem.cartItemId}-${q}`;
+            for (
+              let selIndex = 0;
+              selIndex < cartItem.comboSelections.length;
+              selIndex++
+            ) {
+              const selection = cartItem.comboSelections[selIndex];
               items.push({
                 product_id: selection.productId,
                 product_name: selection.productName,
@@ -1705,6 +2020,9 @@ export function POSView() {
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
                 combo_name: cartItem.comboName,
+                combo_instance_id: comboInstanceId,
+                combo_slot_index: selIndex,
+                combo_unit_price: cartItem.price, // Store actual combo price
               });
             }
           }
@@ -1741,16 +2059,97 @@ export function POSView() {
         scheduledTimeISO,
         customerName || undefined,
         orderType,
-        orderType === 'delivery' ? deliveryAddress || undefined : undefined
+        orderType === 'delivery' ? deliveryAddress || undefined : undefined,
+        currentDeliveryCharge > 0 ? currentDeliveryCharge : undefined
       );
 
-      // Deduct stock for each item
-      for (const item of items) {
-        await deductMateriaPrimaStock(
-          item.product_id,
-          item.quantity,
-          item.removedIngredients
-        );
+      // Aggregate all stock deductions before applying
+      const productStockDeductions = new Map<string, number>();
+      const materiaPrimaDeductions = new Map<string, number>();
+
+      // Helper to aggregate materia prima deductions for a product
+      const aggregateMateriaPrimaForProduct = async (
+        productId: string,
+        quantity: number,
+        removedIngredients?: string[]
+      ) => {
+        const links = await getProductMateriaPrima(productId);
+        for (const link of links) {
+          // Skip if this ingredient was removed
+          if (removedIngredients && removedIngredients.length > 0) {
+            const mp = materiaPrima.find((m) => m.id === link.materia_prima_id);
+            if (mp && removedIngredients.includes(mp.name)) {
+              continue;
+            }
+          }
+          const current = materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+          materiaPrimaDeductions.set(
+            link.materia_prima_id,
+            current + link.quantity * quantity
+          );
+        }
+      };
+
+      // Process regular cart items
+      for (const item of cart) {
+        if (item.isCombo) continue;
+
+        if (item.uses_materia_prima) {
+          await aggregateMateriaPrimaForProduct(
+            item.id,
+            item.quantity,
+            item.removedIngredients
+          );
+        } else {
+          const current = productStockDeductions.get(item.id) || 0;
+          productStockDeductions.set(item.id, current + item.quantity);
+        }
+      }
+
+      // Process combo items
+      const comboItems = cart.filter(
+        (item) => item.isCombo && item.comboSelections
+      );
+
+      for (const comboItem of comboItems) {
+        for (const selection of comboItem.comboSelections!) {
+          const product = products.find((p) => p.id === selection.productId);
+          if (!product) continue;
+
+          if (product.uses_materia_prima) {
+            await aggregateMateriaPrimaForProduct(
+              selection.productId,
+              comboItem.quantity,
+              selection.removedIngredients || []
+            );
+          } else {
+            const current = productStockDeductions.get(selection.productId) || 0;
+            productStockDeductions.set(
+              selection.productId,
+              current + comboItem.quantity
+            );
+          }
+        }
+      }
+
+      // Apply all product stock deductions
+      for (const [productId, quantity] of productStockDeductions) {
+        await updateStock(productId, -quantity);
+      }
+
+      // Apply all materia prima deductions
+      for (const [mpId, quantity] of materiaPrimaDeductions) {
+        const mp = await db.get<MateriaPrima>('materia_prima', mpId);
+        if (mp) {
+          const newStock = mp.stock - quantity;
+          if (newStock >= 0) {
+            await db.put('materia_prima', {
+              ...mp,
+              stock: newStock,
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
       }
 
       // Send to KDS if enabled
@@ -1778,6 +2177,9 @@ export function POSView() {
       setOrderType('pickup');
       setDeliveryAddress('');
       setNextSaleNumber((prev) => (prev !== null ? prev + 1 : prev));
+
+      await refreshProducts();
+      await refreshMateriaPrima();
 
       toast.success('¡Pedido enviado sin pago!');
     } catch (error) {
@@ -1926,6 +2328,8 @@ export function POSView() {
 
   const canComplete = () => {
     if (cart.length === 0) return false;
+    // Check for valid scheduled time if set
+    if (scheduledTime && !isValidTime(scheduledTime)) return false;
     if (
       paymentMethod === 'online' ||
       paymentMethod === 'card' ||
@@ -2181,6 +2585,60 @@ export function POSView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products, materiaPrima]);
 
+  // Calculate combo stock availability
+  useEffect(() => {
+    const calculateComboStock = async () => {
+      const stockStatus: Record<string, boolean> = {};
+
+      for (const combo of activeCombos) {
+        let comboHasStock = true;
+
+        // Check each slot - a combo is out of stock if any slot has no available products
+        for (const slot of combo.slots) {
+          // Get products for this slot
+          let slotProductIds: string[] = [];
+          if (slot.is_dynamic && slot.category) {
+            // Dynamic slot: get all products in the category
+            slotProductIds = products
+              .filter((p) => p.category === slot.category && p.active)
+              .map((p) => p.id);
+          } else if (slot.product_ids && slot.product_ids.length > 0) {
+            // Fixed products slot
+            slotProductIds = slot.product_ids;
+          }
+
+          // Check if at least one product in this slot has stock
+          let slotHasAvailableProduct = false;
+          for (const productId of slotProductIds) {
+            const product = products.find((p) => p.id === productId);
+            if (!product || !product.active) continue;
+
+            const stock = product.uses_materia_prima
+              ? productStocks[productId] || 0
+              : product.stock;
+
+            if (stock > 0) {
+              slotHasAvailableProduct = true;
+              break;
+            }
+          }
+
+          // If no product has stock in this slot, combo is out of stock
+          if (!slotHasAvailableProduct && slotProductIds.length > 0) {
+            comboHasStock = false;
+            break;
+          }
+        }
+
+        stockStatus[combo.id] = comboHasStock;
+      }
+
+      setComboStockStatus(stockStatus);
+    };
+
+    calculateComboStock();
+  }, [activeCombos, products, productStocks]);
+
   // KDS WebSocket and polling when panel is open
   useEffect(() => {
     if (showKdsPanel) {
@@ -2333,6 +2791,7 @@ export function POSView() {
                                 combo={combo}
                                 isLocked={isLayoutLocked}
                                 onOpenComboModal={openComboModal}
+                                isOutOfStock={comboStockStatus[combo.id] === false}
                               />
                             ))}
                           </div>
@@ -2369,6 +2828,7 @@ export function POSView() {
                               hasRemovableIngredients={productsWithRemovableIngredients.has(
                                 product.id
                               )}
+                              isOutOfStock={getProductStock(product) <= 0}
                             />
                           ))}
                         </div>
@@ -2381,7 +2841,9 @@ export function POSView() {
         </div>
 
         <div
-          className='w-96 shadow-xl p-6 flex flex-col'
+          className={`shadow-xl p-6 flex flex-col transition-all duration-300 ${
+            showPayment ? 'w-[720px]' : 'w-96'
+          }`}
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
           <div className='flex items-center justify-between mb-6'>
@@ -2445,299 +2907,232 @@ export function POSView() {
             </div>
           </div>
 
-          <div className='flex-1 overflow-auto scrollbar-hide mb-6'>
-            {cart.length === 0 ? (
-              <div
-                className='text-center opacity-60 mt-12'
-                style={{ color: 'var(--color-text)' }}
-              >
-                El carrito está vacío
-              </div>
-            ) : (
-              <div className='space-y-3'>
-                {cart.map((item) => (
-                  <div
-                    key={item.cartItemId}
-                    className='p-3 rounded-lg'
-                    style={{ backgroundColor: 'var(--color-background)' }}
-                  >
-                    <div className='flex items-center justify-between mb-1'>
-                      <div className='flex items-center gap-2'>
-                        <div
-                          className='font-semibold'
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          {item.name}
-                        </div>
-                        {item.isCombo && (
-                          <span
-                            className='text-xs px-1.5 py-0.5 rounded'
-                            style={{
-                              backgroundColor: 'var(--color-accent)',
-                              color: 'var(--color-on-accent)',
-                            }}
+          {/* Two-column layout when in payment mode */}
+          <div
+            className={`flex-1 flex ${
+              showPayment ? 'gap-6' : 'flex-col'
+            } overflow-hidden`}
+          >
+            {/* Cart Column */}
+            <div
+              className={`${
+                showPayment ? 'w-1/2 border-r pr-4' : 'flex-1'
+              } overflow-auto scrollbar-hide ${showPayment ? '' : 'mb-6'}`}
+              style={{
+                borderColor: showPayment
+                  ? 'var(--color-background-accent)'
+                  : 'transparent',
+              }}
+            >
+              {cart.length === 0 ? (
+                <div
+                  className='text-center opacity-60 mt-12'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  El carrito está vacío
+                </div>
+              ) : (
+                <div className='space-y-3'>
+                  {showPayment && (
+                    <div
+                      className='text-sm font-semibold mb-3 pb-2 border-b'
+                      style={{
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-background-accent)',
+                      }}
+                    >
+                      Resumen del Pedido (
+                      {cart.reduce((sum, item) => sum + item.quantity, 0)}{' '}
+                      items)
+                    </div>
+                  )}
+                  {cart.map((item) => (
+                    <div
+                      key={item.cartItemId}
+                      className='p-3 rounded-lg'
+                      style={{ backgroundColor: 'var(--color-background)' }}
+                    >
+                      <div className='flex items-center justify-between mb-1'>
+                        <div className='flex items-center gap-2'>
+                          <div
+                            className={`font-semibold ${
+                              showPayment ? 'text-sm' : ''
+                            }`}
+                            style={{ color: 'var(--color-text)' }}
                           >
-                            COMBO
-                          </span>
+                            {item.name}
+                          </div>
+                          {item.isCombo && (
+                            <span
+                              className='text-xs px-1.5 py-0.5 rounded'
+                              style={{
+                                backgroundColor: 'var(--color-accent)',
+                                color: 'var(--color-on-accent)',
+                              }}
+                            >
+                              COMBO
+                            </span>
+                          )}
+                        </div>
+                        {!showPayment && (
+                          <button
+                            onClick={() => removeFromCart(item.cartItemId)}
+                            className='text-red-500'
+                          >
+                            <X size={18} />
+                          </button>
                         )}
                       </div>
-                      <button
-                        onClick={() => removeFromCart(item.cartItemId)}
-                        className='text-red-500'
-                      >
-                        <X size={18} />
-                      </button>
-                    </div>
-                    {/* Combo selections display */}
-                    {item.isCombo && item.comboSelections && (
-                      <div
-                        className='text-xs mb-2 pl-2 border-l-2'
-                        style={{
-                          borderColor: 'var(--color-accent)',
-                          color: 'var(--color-text)',
-                          opacity: 0.8,
-                        }}
-                      >
-                        {item.comboSelections.map((sel, idx) => (
-                          <div key={idx} className='mb-0.5'>
-                            <span className='font-medium'>{sel.slotName}:</span>{' '}
-                            {sel.productName}
-                            {sel.removedIngredients.length > 0 && (
-                              <span
-                                className='italic ml-1'
-                                style={{ color: 'var(--color-primary)' }}
-                              >
-                                (sin {sel.removedIngredients.join(', ')})
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* Regular product removed ingredients */}
-                    {!item.isCombo && item.removedIngredients.length > 0 && (
-                      <div
-                        className='text-xs mb-2 italic'
-                        style={{ color: 'var(--color-primary)' }}
-                      >
-                        Sin: {item.removedIngredients.join(', ')}
-                      </div>
-                    )}
-                    <div className='flex items-center justify-between'>
-                      <div className='flex items-center gap-2'>
-                        <button
-                          onClick={() =>
-                            updateQuantity(item.cartItemId, item.quantity - 1)
-                          }
-                          className='w-8 h-8 rounded'
+                      {/* Combo selections display */}
+                      {item.isCombo && item.comboSelections && (
+                        <div
+                          className='text-xs mb-2 pl-2 border-l-2'
                           style={{
-                            backgroundColor:
-                              'var(--color-background-secondary)',
+                            borderColor: 'var(--color-accent)',
                             color: 'var(--color-text)',
+                            opacity: 0.8,
                           }}
                         >
-                          -
-                        </button>
-                        <span
-                          className='w-8 text-center'
+                          {item.comboSelections.map((sel, idx) => (
+                            <div key={idx} className='mb-0.5'>
+                              <span className='font-medium'>
+                                {sel.slotName}:
+                              </span>{' '}
+                              {sel.productName}
+                              {sel.removedIngredients.length > 0 && (
+                                <span
+                                  className='italic ml-1'
+                                  style={{ color: 'var(--color-primary)' }}
+                                >
+                                  (sin {sel.removedIngredients.join(', ')})
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Regular product removed ingredients */}
+                      {!item.isCombo && item.removedIngredients.length > 0 && (
+                        <div
+                          className='text-xs mb-2 italic'
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          Sin: {item.removedIngredients.join(', ')}
+                        </div>
+                      )}
+                      <div className='flex items-center justify-between'>
+                        {showPayment ? (
+                          <span
+                            className='text-sm opacity-70'
+                            style={{ color: 'var(--color-text)' }}
+                          >
+                            x{formatNumber(item.quantity)}
+                          </span>
+                        ) : (
+                          <div className='flex items-center gap-2'>
+                            <button
+                              onClick={() =>
+                                updateQuantity(
+                                  item.cartItemId,
+                                  item.quantity - 1
+                                )
+                              }
+                              className='w-8 h-8 rounded'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-secondary)',
+                                color: 'var(--color-text)',
+                              }}
+                            >
+                              -
+                            </button>
+                            <span
+                              className='w-8 text-center'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {formatNumber(item.quantity)}
+                            </span>
+                            <button
+                              onClick={() =>
+                                updateQuantity(
+                                  item.cartItemId,
+                                  item.quantity + 1
+                                )
+                              }
+                              className='w-8 h-8 rounded'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-secondary)',
+                                color: 'var(--color-text)',
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        )}
+                        <div
+                          className='font-bold'
                           style={{ color: 'var(--color-text)' }}
                         >
-                          {formatNumber(item.quantity)}
-                        </span>
-                        <button
-                          onClick={() =>
-                            updateQuantity(item.cartItemId, item.quantity + 1)
-                          }
-                          className='w-8 h-8 rounded'
-                          style={{
-                            backgroundColor:
-                              'var(--color-background-secondary)',
-                            color: 'var(--color-text)',
-                          }}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <div
-                        className='font-bold'
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {formatPrice(item.price * item.quantity)}
+                          {formatPrice(item.price * item.quantity)}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className='border-t pt-4'>
-            {/* Pre-checkout: Time, Name, Order Type - only show before payment */}
-            {!showPayment && (
-              <>
-                {/* Scheduled Time Picker */}
-                <div className='mb-4'>
-                  <label
-                    className='flex items-center gap-2 text-sm mb-2'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Clock size={16} />
-                    <span>Hora programada (opcional)</span>
-                  </label>
-                  <input
-                    type='text'
-                    inputMode='numeric'
-                    placeholder='HH:MM (ej: 2030)'
-                    value={scheduledTime}
-                    onChange={(e) => {
-                      // Auto-format: only digits, add colon after 2 digits
-                      let val = e.target.value.replace(/[^0-9]/g, '');
-                      if (val.length > 4) val = val.slice(0, 4);
-                      if (val.length > 2) {
-                        val = val.slice(0, 2) + ':' + val.slice(2);
-                      }
-                      setScheduledTime(val);
-                    }}
-                    className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
-                    style={{
-                      backgroundColor: 'var(--color-background)',
-                      borderColor: 'var(--color-background-accent)',
-                      color: 'var(--color-text)',
-                    }}
-                  />
-                  {scheduledTime && (
-                    <button
-                      onClick={() => setScheduledTime('')}
-                      className='text-xs mt-1 hover:underline'
-                      style={{ color: 'var(--color-accent)' }}
-                    >
-                      Limpiar hora
-                    </button>
-                  )}
+                  ))}
                 </div>
-
-                {/* Customer Name */}
-                <div className='mb-4'>
-                  <label
-                    className='flex items-center gap-2 text-sm mb-2'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <User size={16} />
-                    <span>Nombre del cliente (opcional)</span>
-                  </label>
-                  <input
-                    type='text'
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder='Ej: Juan'
-                    className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
-                    style={{
-                      backgroundColor: 'var(--color-background)',
-                      borderColor: 'var(--color-background-accent)',
-                      color: 'var(--color-text)',
-                    }}
-                  />
-                </div>
-
-                {/* Order Type (Pickup / Delivery) */}
-                <div className='mb-4'>
-                  <label
-                    className='flex items-center gap-2 text-sm mb-2'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <span>Tipo de entrega</span>
-                  </label>
-                  <div className='flex gap-2'>
-                    <button
-                      onClick={() => setOrderType('pickup')}
-                      className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
-                      style={{
-                        backgroundColor:
-                          orderType === 'pickup'
-                            ? 'var(--color-accent)'
-                            : 'var(--color-background)',
-                        color:
-                          orderType === 'pickup'
-                            ? 'var(--color-on-accent)'
-                            : 'var(--color-text)',
-                      }}
-                    >
-                      <Home size={16} />
-                      Retiro
-                    </button>
-                    <button
-                      onClick={() => setOrderType('delivery')}
-                      className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
-                      style={{
-                        backgroundColor:
-                          orderType === 'delivery'
-                            ? 'var(--color-accent)'
-                            : 'var(--color-background)',
-                        color:
-                          orderType === 'delivery'
-                            ? 'var(--color-on-accent)'
-                            : 'var(--color-text)',
-                      }}
-                    >
-                      <Truck size={16} />
-                      Delivery
-                    </button>
-                  </div>
-                </div>
-
-                {/* Delivery Address - only show when delivery is selected */}
-                {orderType === 'delivery' && (
-                  <div className='mb-4'>
-                    <label
-                      className='flex items-center gap-2 text-sm mb-2'
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <Truck size={16} />
-                      <span>Dirección de entrega</span>
-                    </label>
-                    <input
-                      type='text'
-                      value={deliveryAddress}
-                      onChange={(e) => setDeliveryAddress(e.target.value)}
-                      placeholder='Ej: Calle 123, Piso 4'
-                      className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
-                      style={{
-                        backgroundColor: 'var(--color-background)',
-                        borderColor: 'var(--color-background-accent)',
-                        color: 'var(--color-text)',
-                      }}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-
-            <div
-              className='flex justify-between text-2xl font-bold mb-4'
-              style={{ color: 'var(--color-text)' }}
-            >
-              <span>Total:</span>
-              <span style={{ color: 'var(--color-primary)' }}>
-                {formatPrice(total)}
-              </span>
+              )}
             </div>
 
-            {!showPayment ? (
-              <button
-                onClick={() => setShowPayment(true)}
-                disabled={cart.length === 0}
-                className='w-full py-4 rounded-lg text-white font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:opacity-90'
-                style={{
-                  backgroundColor: 'var(--color-accent)',
-                  color: 'var(--color-on-accent)',
-                }}
-              >
-                Proceder al Pago
-              </button>
-            ) : (
-              <div>
+            {/* Payment Column - only visible when showPayment is true */}
+            {showPayment && (
+              <div className='w-1/2 overflow-auto scrollbar-hide flex flex-col'>
+                {/* Subtotal and delivery charge breakdown */}
+                {currentDeliveryCharge > 0 && (
+                  <div
+                    className='mb-2 text-sm'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <div className='flex justify-between'>
+                      <span>Subtotal:</span>
+                      <span>{formatPrice(subtotal)}</span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span>Cargo por Delivery:</span>
+                      <span>{formatPrice(currentDeliveryCharge)}</span>
+                    </div>
+                  </div>
+                )}
+                {orderType === 'delivery' &&
+                  isDeliveryFree &&
+                  deliveryChargeAmount > 0 && (
+                    <div
+                      className='mb-2 text-sm flex justify-between'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      <span>Delivery Gratis</span>
+                      <span className='line-through opacity-60'>
+                        {formatPrice(deliveryChargeAmount)}
+                      </span>
+                    </div>
+                  )}
+                <div
+                  className='flex justify-between text-xl font-bold mb-4 pb-3 border-b'
+                  style={{
+                    color: 'var(--color-text)',
+                    borderColor: 'var(--color-background-accent)',
+                  }}
+                >
+                  <span>Total:</span>
+                  <span style={{ color: 'var(--color-primary)' }}>
+                    {formatPrice(total)}
+                  </span>
+                </div>
+                {/* Payment methods inside payment column */}
                 <div className='mb-4'>
-                  <div className='text-sm mb-2 dark:text-white'>
+                  <div
+                    className='text-sm mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
                     Método de Pago:
                   </div>
                   <div className='grid grid-cols-2 gap-2 mb-4'>
@@ -2748,7 +3143,7 @@ export function POSView() {
                         setChangeBreakdown(null);
                         setBillHistory([]);
                       }}
-                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
                       style={
                         paymentMethod === 'cash'
                           ? {
@@ -2761,12 +3156,12 @@ export function POSView() {
                             }
                       }
                     >
-                      <Banknote size={20} />
+                      <Banknote size={16} />
                       Efectivo
                     </button>
                     <button
                       onClick={() => setPaymentMethod('online')}
-                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
                       style={
                         paymentMethod === 'online'
                           ? {
@@ -2779,12 +3174,12 @@ export function POSView() {
                             }
                       }
                     >
-                      <Smartphone size={20} />
+                      <Smartphone size={16} />
                       Transferencia
                     </button>
                     <button
                       onClick={() => setPaymentMethod('card')}
-                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
                       style={
                         paymentMethod === 'card'
                           ? {
@@ -2797,12 +3192,12 @@ export function POSView() {
                             }
                       }
                     >
-                      <CreditCard size={20} />
+                      <CreditCard size={16} />
                       Tarjeta
                     </button>
                     <button
                       onClick={() => setPaymentMethod('on_delivery')}
-                      className='py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all'
+                      className='py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all text-sm'
                       style={
                         paymentMethod === 'on_delivery'
                           ? {
@@ -2815,128 +3210,125 @@ export function POSView() {
                             }
                       }
                     >
-                      <Truck size={20} />
+                      <Truck size={16} />
                       En Entrega
                     </button>
                   </div>
                 </div>
 
-                {paymentMethod === 'cash' ? (
-                  <div>
-                    <div className='mb-4'>
-                      <div className='flex items-center justify-between mb-2'>
-                        <div className='text-sm dark:text-white'>
-                          Efectivo Recibido:
+                {/* Cash Calculator - Only for cash payment */}
+                {paymentMethod === 'cash' && (
+                  <div className='mb-4'>
+                    <div className='flex items-center justify-between mb-2'>
+                      <div
+                        className='text-sm'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Efectivo Recibido:
+                      </div>
+                      <div className='flex gap-2'>
+                        {billHistory.length > 0 && (
+                          <button
+                            onClick={undoLastBill}
+                            className='text-xs px-2 py-1 rounded border flex items-center gap-1'
+                            style={{
+                              backgroundColor:
+                                'var(--color-background-secondary)',
+                              borderColor: 'var(--color-accent)',
+                              color: 'var(--color-accent)',
+                            }}
+                          >
+                            <Undo size={12} />
+                          </button>
+                        )}
+                        {cashReceived > 0 && (
+                          <button
+                            onClick={resetCash}
+                            className='text-xs px-2 py-1 rounded flex items-center gap-1'
+                            style={{
+                              backgroundColor: 'var(--color-background-accent)',
+                              color: 'var(--color-text)',
+                            }}
+                          >
+                            <RotateCcw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      className='text-2xl font-bold mb-2'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {formatPrice(cashReceived)}
+                    </div>
+                    <div
+                      className='text-sm mb-2'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Cambio:{' '}
+                      <span className='font-bold'>
+                        {change >= 0 ? formatPrice(change) : '$0'}
+                      </span>
+                    </div>
+
+                    {changeBreakdown && change > 0 && (
+                      <div
+                        className='mt-2 p-2 rounded-lg border'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                          borderColor: 'var(--color-accent)',
+                        }}
+                      >
+                        <div
+                          className='text-xs font-semibold mb-1'
+                          style={{ color: 'var(--color-accent)' }}
+                        >
+                          Entregar cambio:
                         </div>
-                        <div className='flex gap-2'>
-                          {billHistory.length > 0 && (
-                            <button
-                              onClick={undoLastBill}
-                              className='text-xs px-2 py-1 rounded border flex items-center gap-1'
+                        <div className='flex flex-wrap gap-1'>
+                          {changeBreakdown.map((item) => (
+                            <span
+                              key={item.bill_value}
+                              className='text-xs px-2 py-1 rounded'
                               style={{
-                                backgroundColor:
-                                  'var(--color-background-secondary)',
-                                borderColor: 'var(--color-accent)',
-                                color: 'var(--color-accent)',
-                              }}
-                            >
-                              <Undo size={12} />
-                              Deshacer
-                            </button>
-                          )}
-                          {cashReceived > 0 && (
-                            <button
-                              onClick={resetCash}
-                              className='text-xs px-2 py-1 rounded flex items-center gap-1'
-                              style={{
-                                backgroundColor:
-                                  'var(--color-background-accent)',
+                                backgroundColor: 'var(--color-background)',
                                 color: 'var(--color-text)',
                               }}
                             >
-                              <RotateCcw size={12} />
-                              Reiniciar
-                            </button>
-                          )}
+                              {formatNumber(item.quantity)}x{' '}
+                              {formatPrice(item.bill_value)}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                      <div
-                        className='text-3xl font-bold mb-2'
-                        style={{ color: 'var(--color-accent)' }}
-                      >
-                        {formatPrice(cashReceived)}
-                      </div>
-                      <div className='text-sm mb-2 dark:text-white'>
-                        Cambio:{' '}
-                        <span className='font-bold'>
-                          {change >= 0 ? formatPrice(change) : '$0'}
-                        </span>
-                      </div>
+                    )}
 
-                      {changeBreakdown && change > 0 && (
+                    {change > 0 &&
+                      !changeBreakdown &&
+                      cashReceived >= total && (
                         <div
-                          className='mt-3 p-3 rounded-lg border'
+                          className='mt-2 p-2 rounded-lg border'
                           style={{
                             backgroundColor: 'var(--color-background-accent)',
-                            borderColor: 'var(--color-accent)',
+                            borderColor: 'var(--color-primary)',
                           }}
                         >
                           <div
-                            className='text-sm font-semibold mb-2'
-                            style={{ color: 'var(--color-accent)' }}
+                            className='text-xs'
+                            style={{ color: 'var(--color-primary)' }}
                           >
-                            Entregar cambio:
-                          </div>
-                          <div className='space-y-1'>
-                            {changeBreakdown.map((item) => (
-                              <div
-                                key={item.bill_value}
-                                className='flex justify-between text-sm text-green-700 dark:text-green-400'
-                              >
-                                <span>{formatNumber(item.quantity)}x</span>
-                                <span className='font-bold'>
-                                  {formatPrice(item.bill_value)}
-                                </span>
-                              </div>
-                            ))}
+                            No se puede dar cambio exacto
                           </div>
                         </div>
                       )}
 
-                      {change > 0 &&
-                        !changeBreakdown &&
-                        cashReceived >= total && (
-                          <div
-                            className='mt-3 p-3 rounded-lg border'
-                            style={{
-                              backgroundColor: 'var(--color-background-accent)',
-                              borderColor: 'var(--color-primary)',
-                            }}
-                          >
-                            <div
-                              className='text-sm'
-                              style={{ color: 'var(--color-primary)' }}
-                            >
-                              No se puede dar cambio exacto con los billetes
-                              disponibles
-                            </div>
-                          </div>
-                        )}
-                    </div>
-
-                    <div className='mb-4'>
-                      <div
-                        className='text-xs mb-2'
-                        style={{ color: 'var(--color-text)', opacity: 0.7 }}
-                      >
-                        Agregar billetes:
-                      </div>
-                      <div className='grid grid-cols-5 gap-2'>
+                    <div className='mt-3'>
+                      <div className='grid grid-cols-5 gap-1'>
                         {BILLS.map((bill) => (
                           <button
                             key={bill}
                             onClick={() => addCash(bill)}
-                            className='py-2 px-3 rounded font-semibold'
+                            className='py-1.5 px-1 rounded text-xs font-semibold'
                             style={{
                               backgroundColor: 'var(--color-background-accent)',
                               color: 'var(--color-text)',
@@ -2948,9 +3340,12 @@ export function POSView() {
                       </div>
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {/* Non-cash payment indicator */}
+                {paymentMethod !== 'cash' && (
                   <div
-                    className='mb-4 p-4 rounded-lg border'
+                    className='mb-4 p-3 rounded-lg border'
                     style={{
                       backgroundColor: 'var(--color-background-accent)',
                       borderColor: 'var(--color-accent)',
@@ -2960,19 +3355,20 @@ export function POSView() {
                       className='text-center'
                       style={{ color: 'var(--color-accent)' }}
                     >
-                      <CreditCard size={32} className='mx-auto mb-2' />
-                      <div className='font-semibold'>Pago en Línea</div>
-                      <div
-                        className='text-sm mt-1'
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        El cliente pagará electrónicamente
+                      <CreditCard size={24} className='mx-auto mb-1' />
+                      <div className='text-sm font-semibold'>
+                        {paymentMethod === 'online'
+                          ? 'Transferencia'
+                          : paymentMethod === 'card'
+                          ? 'Tarjeta'
+                          : 'Contra Entrega'}
                       </div>
                     </div>
                   </div>
                 )}
 
-                <div className='space-y-2'>
+                {/* Action buttons */}
+                <div className='space-y-2 mt-auto'>
                   <button
                     onClick={completeSale}
                     disabled={!canComplete() || processing}
@@ -2986,7 +3382,11 @@ export function POSView() {
                   </button>
                   <button
                     onClick={sendUnpaid}
-                    disabled={cart.length === 0 || processing}
+                    disabled={
+                      cart.length === 0 ||
+                      processing ||
+                      (scheduledTime !== '' && !isValidTime(scheduledTime))
+                    }
                     className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed'
                     style={{
                       backgroundColor: 'var(--color-accent)',
@@ -2997,18 +3397,212 @@ export function POSView() {
                   </button>
                   <button
                     onClick={cancelPayment}
-                    className='w-full py-3 rounded-lg font-bold'
+                    className='w-full py-2 rounded-lg font-semibold'
                     style={{
                       backgroundColor: 'var(--color-background-accent)',
                       color: 'var(--color-text)',
                     }}
                   >
-                    Cancelar
+                    Volver
                   </button>
                 </div>
               </div>
             )}
           </div>
+
+          {/* Footer section - only when NOT in payment mode */}
+          {!showPayment && (
+            <div className='border-t pt-4'>
+              {/* Pre-checkout: Time, Name, Order Type */}
+              <div className='mb-4'>
+                <label
+                  className='flex items-center gap-2 text-sm mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <Clock size={16} />
+                  <span>Hora programada (opcional)</span>
+                </label>
+                <input
+                  type='text'
+                  inputMode='numeric'
+                  placeholder='HH:MM (ej: 20:30)'
+                  value={scheduledTime}
+                  onChange={(e) => handleTimeChange(e.target.value)}
+                  className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    borderColor:
+                      scheduledTime && !isValidTime(scheduledTime)
+                        ? '#ef4444'
+                        : 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+                <div className='flex items-center justify-between mt-1'>
+                  {scheduledTime && !isValidTime(scheduledTime) && (
+                    <span className='text-xs' style={{ color: '#ef4444' }}>
+                      Hora inválida
+                    </span>
+                  )}
+                  {scheduledTime && isValidTime(scheduledTime) && (
+                    <button
+                      onClick={() => setScheduledTime('')}
+                      className='text-xs hover:underline'
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      Limpiar hora
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Customer Name */}
+              <div className='mb-4'>
+                <label
+                  className='flex items-center gap-2 text-sm mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <User size={16} />
+                  <span>Nombre del cliente (opcional)</span>
+                </label>
+                <input
+                  type='text'
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder='Ej: Juan'
+                  className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    borderColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+              </div>
+
+              {/* Order Type (Pickup / Delivery) */}
+              <div className='mb-4'>
+                <label
+                  className='flex items-center gap-2 text-sm mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <span>Tipo de entrega</span>
+                </label>
+                <div className='flex gap-2'>
+                  <button
+                    onClick={() => setOrderType('pickup')}
+                    className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                    style={{
+                      backgroundColor:
+                        orderType === 'pickup'
+                          ? 'var(--color-accent)'
+                          : 'var(--color-background)',
+                      color:
+                        orderType === 'pickup'
+                          ? 'var(--color-on-accent)'
+                          : 'var(--color-text)',
+                    }}
+                  >
+                    <Home size={16} />
+                    Retiro
+                  </button>
+                  <button
+                    onClick={() => setOrderType('delivery')}
+                    className='flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg font-semibold transition-all'
+                    style={{
+                      backgroundColor:
+                        orderType === 'delivery'
+                          ? 'var(--color-accent)'
+                          : 'var(--color-background)',
+                      color:
+                        orderType === 'delivery'
+                          ? 'var(--color-on-accent)'
+                          : 'var(--color-text)',
+                    }}
+                  >
+                    <Truck size={16} />
+                    Delivery
+                  </button>
+                </div>
+              </div>
+
+              {/* Delivery Address - only show when delivery is selected */}
+              {orderType === 'delivery' && (
+                <div className='mb-4'>
+                  <label
+                    className='flex items-center gap-2 text-sm mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Truck size={16} />
+                    <span>Dirección de entrega</span>
+                  </label>
+                  <input
+                    type='text'
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    placeholder='Ej: Calle 123, Piso 4'
+                    className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
+                    style={{
+                      backgroundColor: 'var(--color-background)',
+                      borderColor: 'var(--color-background-accent)',
+                      color: 'var(--color-text)',
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Total with delivery charge breakdown */}
+              {currentDeliveryCharge > 0 && (
+                <div
+                  className='mb-2 text-sm'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <div className='flex justify-between'>
+                    <span>Subtotal:</span>
+                    <span>{formatPrice(subtotal)}</span>
+                  </div>
+                  <div className='flex justify-between'>
+                    <span>Cargo por Delivery:</span>
+                    <span>{formatPrice(currentDeliveryCharge)}</span>
+                  </div>
+                </div>
+              )}
+              {orderType === 'delivery' &&
+                isDeliveryFree &&
+                deliveryChargeAmount > 0 && (
+                  <div
+                    className='mb-2 text-sm flex justify-between'
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    <span>Delivery Gratis</span>
+                    <span className='line-through opacity-60'>
+                      {formatPrice(deliveryChargeAmount)}
+                    </span>
+                  </div>
+                )}
+              <div
+                className='flex justify-between text-2xl font-bold mb-4'
+                style={{ color: 'var(--color-text)' }}
+              >
+                <span>Total:</span>
+                <span style={{ color: 'var(--color-primary)' }}>
+                  {formatPrice(total)}
+                </span>
+              </div>
+
+              {/* Proceed to payment button */}
+              <button
+                onClick={() => setShowPayment(true)}
+                disabled={cart.length === 0}
+                className='w-full py-4 rounded-lg text-white font-bold text-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:opacity-90'
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'var(--color-on-accent)',
+                }}
+              >
+                Proceder al Pago
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

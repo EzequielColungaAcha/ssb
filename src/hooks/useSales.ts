@@ -35,6 +35,9 @@ export function useSales() {
       quantity: number;
       removedIngredients?: string[];
       combo_name?: string;
+      combo_instance_id?: string;
+      combo_slot_index?: number;
+      combo_unit_price?: number;
     }>,
     paymentMethod: string,
     cashReceived?: number,
@@ -43,14 +46,30 @@ export function useSales() {
     scheduledTime?: string,
     customerName?: string,
     orderType?: 'pickup' | 'delivery',
-    deliveryAddress?: string
+    deliveryAddress?: string,
+    deliveryCharge?: number
   ) => {
     try {
       await db.init();
-      const totalAmount = items.reduce(
-        (sum, item) => sum + item.product_price * item.quantity,
-        0
-      );
+      
+      // Calculate total correctly: combo items use combo_unit_price, standalone use product price
+      const comboInstancePrices = new Map<string, number>();
+      let standaloneTotal = 0;
+
+      items.forEach((item) => {
+        if (item.combo_instance_id && item.combo_unit_price !== undefined) {
+          // Only count each combo instance once
+          if (!comboInstancePrices.has(item.combo_instance_id)) {
+            comboInstancePrices.set(item.combo_instance_id, item.combo_unit_price);
+          }
+        } else {
+          standaloneTotal += item.product_price * item.quantity;
+        }
+      });
+
+      const itemsTotal = standaloneTotal + 
+        Array.from(comboInstancePrices.values()).reduce((sum, price) => sum + price, 0);
+      const totalAmount = itemsTotal + (deliveryCharge || 0);
       const changeGiven = cashReceived ? cashReceived - totalAmount : undefined;
 
       const allSales = await db.getAll<Sale>('sales');
@@ -79,6 +98,7 @@ export function useSales() {
         customer_name: customerName,
         order_type: orderType,
         delivery_address: deliveryAddress,
+        delivery_charge: deliveryCharge,
         completed_at: now,
         created_at: now,
       };
@@ -96,6 +116,9 @@ export function useSales() {
         subtotal: item.product_price * item.quantity,
         removed_ingredients: item.removedIngredients,
         combo_name: item.combo_name,
+        combo_instance_id: item.combo_instance_id,
+        combo_slot_index: item.combo_slot_index,
+        combo_unit_price: item.combo_unit_price,
         created_at: now,
       }));
 

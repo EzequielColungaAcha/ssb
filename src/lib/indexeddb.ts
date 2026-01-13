@@ -48,6 +48,7 @@ export interface Sale {
   customer_name?: string;
   order_type?: 'pickup' | 'delivery';
   delivery_address?: string;
+  delivery_charge?: number; // The delivery charge applied to this sale
   delivered_at?: string; // ISO timestamp when delivery was completed
   completed_at: string;
   created_at: string;
@@ -64,6 +65,9 @@ export interface SaleItem {
   subtotal: number;
   removed_ingredients?: string[];
   combo_name?: string;
+  combo_instance_id?: string; // Unique ID for each combo instance in a sale
+  combo_slot_index?: number; // Order of product within combo (for proper display ordering)
+  combo_unit_price?: number; // The actual combo price (not sum of products)
   created_at: string;
 }
 
@@ -122,6 +126,8 @@ export interface AppSettings {
   category_order?: string[];
   kds_enabled?: boolean;
   kds_url?: string;
+  delivery_charge?: number; // Flat fee for delivery
+  free_delivery_threshold?: number; // Cart total above which delivery is free
   updated_at: string;
 }
 

@@ -103,16 +103,24 @@ export function useMateriaPrima() {
     }
   };
 
-  const updateStock = async (id: string, quantity: number) => {
-    const mp = materiaPrima.find((m) => m.id === id);
+  const updateStock = async (id: string, delta: number) => {
+    // Read current stock from database to avoid stale state issues
+    await db.init();
+    const mp = await db.get<MateriaPrima>('materia_prima', id);
     if (!mp) return;
 
-    const newStock = mp.stock + quantity;
+    const newStock = mp.stock + delta;
     if (newStock < 0) {
       throw new Error('Stock insuficiente');
     }
 
-    await updateMateriaPrima(id, { stock: newStock });
+    // Update directly in database without triggering full reload
+    const updated: MateriaPrima = {
+      ...mp,
+      stock: newStock,
+      updated_at: new Date().toISOString(),
+    };
+    await db.put('materia_prima', updated);
   };
 
   const getProductMateriaPrima = async (productId: string) => {

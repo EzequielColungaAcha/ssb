@@ -11,6 +11,8 @@ import {
   CreditCard,
   Banknote,
   Smartphone,
+  Filter,
+  X,
   DollarSign,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
@@ -18,6 +20,11 @@ import { Sale, SaleItem } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
+
+// Filter types
+type PaymentMethodFilter = 'cash' | 'online' | 'card' | 'on_delivery';
+type OrderTypeFilter = 'pickup' | 'delivery' | 'all';
+type PaymentStatusFilter = 'paid' | 'unpaid' | 'all';
 
 // Payment method labels for consistent display
 const PAYMENT_LABELS: Record<string, string> = {
@@ -37,12 +44,87 @@ export function SalesView() {
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
 
+  // Filter state
+  const [showFilters, setShowFilters] = useState(false);
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [paymentMethodFilters, setPaymentMethodFilters] = useState<Set<PaymentMethodFilter>>(new Set());
+  const [orderTypeFilter, setOrderTypeFilter] = useState<OrderTypeFilter>('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<PaymentStatusFilter>('all');
+
   // Mark as paid state
   const [markPaymentMethod, setMarkPaymentMethod] = useState<
     'cash' | 'online' | 'card' | 'on_delivery'
   >('cash');
   const [markCashReceived, setMarkCashReceived] = useState(0);
   const [markBillHistory, setMarkBillHistory] = useState<number[]>([]);
+
+  // Filtered sales
+  const filteredSales = useMemo(() => {
+    return sales.filter((sale) => {
+      // Date from filter
+      if (dateFrom) {
+        const saleDate = new Date(sale.completed_at);
+        const fromDate = new Date(dateFrom);
+        fromDate.setHours(0, 0, 0, 0);
+        if (saleDate < fromDate) return false;
+      }
+
+      // Date to filter
+      if (dateTo) {
+        const saleDate = new Date(sale.completed_at);
+        const toDate = new Date(dateTo);
+        toDate.setHours(23, 59, 59, 999);
+        if (saleDate > toDate) return false;
+      }
+
+      // Payment method filter
+      if (paymentMethodFilters.size > 0) {
+        if (!paymentMethodFilters.has(sale.payment_method as PaymentMethodFilter)) {
+          return false;
+        }
+      }
+
+      // Order type filter
+      if (orderTypeFilter !== 'all') {
+        if (sale.order_type !== orderTypeFilter) return false;
+      }
+
+      // Payment status filter
+      if (paymentStatusFilter !== 'all') {
+        const isPaid = sale.payment_method !== 'unpaid';
+        if (paymentStatusFilter === 'paid' && !isPaid) return false;
+        if (paymentStatusFilter === 'unpaid' && isPaid) return false;
+      }
+
+      return true;
+    });
+  }, [sales, dateFrom, dateTo, paymentMethodFilters, orderTypeFilter, paymentStatusFilter]);
+
+  // Toggle payment method filter
+  const togglePaymentMethodFilter = (method: PaymentMethodFilter) => {
+    setPaymentMethodFilters((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(method)) {
+        newSet.delete(method);
+      } else {
+        newSet.add(method);
+      }
+      return newSet;
+    });
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setPaymentMethodFilters(new Set());
+    setOrderTypeFilter('all');
+    setPaymentStatusFilter('all');
+  };
+
+  // Check if any filters are active
+  const hasActiveFilters = dateFrom || dateTo || paymentMethodFilters.size > 0 || orderTypeFilter !== 'all' || paymentStatusFilter !== 'all';
 
   const loadSaleItems = useCallback(
     async (saleId: string) => {
@@ -183,16 +265,194 @@ export function SalesView() {
   return (
     <div className='p-6'>
       <div className='mb-6'>
-        <h1
-          className='text-3xl font-bold flex items-center gap-3'
-          style={{ color: 'var(--color-text)' }}
-        >
-          <History style={{ color: 'var(--color-primary)' }} />
-          Historial de Ventas
-        </h1>
-        <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
-          Consultá el registro completo de todas las transacciones realizadas
-        </p>
+        <div className='flex items-center justify-between'>
+          <div>
+            <h1
+              className='text-3xl font-bold flex items-center gap-3'
+              style={{ color: 'var(--color-text)' }}
+            >
+              <History style={{ color: 'var(--color-primary)' }} />
+              Historial de Ventas
+            </h1>
+            <p className='opacity-60 mt-2' style={{ color: 'var(--color-text)' }}>
+              Consultá el registro completo de todas las transacciones realizadas
+            </p>
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className='flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-all'
+            style={{
+              backgroundColor: hasActiveFilters ? 'var(--color-accent)' : 'var(--color-background-secondary)',
+              color: hasActiveFilters ? 'var(--color-on-accent)' : 'var(--color-text)',
+            }}
+          >
+            <Filter size={18} />
+            Filtros
+            {hasActiveFilters && (
+              <span
+                className='w-5 h-5 rounded-full text-xs flex items-center justify-center'
+                style={{
+                  backgroundColor: 'var(--color-on-accent)',
+                  color: 'var(--color-accent)',
+                }}
+              >
+                {(dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + paymentMethodFilters.size + (orderTypeFilter !== 'all' ? 1 : 0) + (paymentStatusFilter !== 'all' ? 1 : 0)}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Filter Panel */}
+        {showFilters && (
+          <div
+            className='mt-4 p-4 rounded-lg'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div className='flex items-center justify-between mb-4'>
+              <h3
+                className='font-semibold'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Filtros
+              </h3>
+              {hasActiveFilters && (
+                <button
+                  onClick={clearFilters}
+                  className='text-sm flex items-center gap-1 hover:opacity-80'
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  <X size={14} />
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
+              {/* Date Range */}
+              <div>
+                <label
+                  className='block text-sm font-medium mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Fecha desde
+                </label>
+                <input
+                  type='date'
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className='w-full px-3 py-2 rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--color-text)',
+                    border: '1px solid var(--color-background-accent)',
+                  }}
+                />
+              </div>
+              <div>
+                <label
+                  className='block text-sm font-medium mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Fecha hasta
+                </label>
+                <input
+                  type='date'
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className='w-full px-3 py-2 rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background)',
+                    color: 'var(--color-text)',
+                    border: '1px solid var(--color-background-accent)',
+                  }}
+                />
+              </div>
+
+              {/* Order Type */}
+              <div>
+                <label
+                  className='block text-sm font-medium mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Tipo de pedido
+                </label>
+                <div className='flex gap-1'>
+                  {(['all', 'pickup', 'delivery'] as OrderTypeFilter[]).map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setOrderTypeFilter(type)}
+                      className='flex-1 px-2 py-2 rounded-lg text-xs font-semibold transition-all'
+                      style={{
+                        backgroundColor: orderTypeFilter === type ? 'var(--color-accent)' : 'var(--color-background)',
+                        color: orderTypeFilter === type ? 'var(--color-on-accent)' : 'var(--color-text)',
+                      }}
+                    >
+                      {type === 'all' ? 'Todos' : type === 'pickup' ? 'Retiro' : 'Delivery'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Payment Status */}
+              <div>
+                <label
+                  className='block text-sm font-medium mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Estado de pago
+                </label>
+                <div className='flex gap-1'>
+                  {(['all', 'paid', 'unpaid'] as PaymentStatusFilter[]).map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => setPaymentStatusFilter(status)}
+                      className='flex-1 px-2 py-2 rounded-lg text-xs font-semibold transition-all'
+                      style={{
+                        backgroundColor: paymentStatusFilter === status ? 'var(--color-accent)' : 'var(--color-background)',
+                        color: paymentStatusFilter === status ? 'var(--color-on-accent)' : 'var(--color-text)',
+                      }}
+                    >
+                      {status === 'all' ? 'Todos' : status === 'paid' ? 'Pagado' : 'Sin pagar'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Payment Methods */}
+            <div className='mt-4'>
+              <label
+                className='block text-sm font-medium mb-2'
+                style={{ color: 'var(--color-text)' }}
+              >
+                Método de pago
+              </label>
+              <div className='flex flex-wrap gap-2'>
+                {(
+                  [
+                    { key: 'cash', label: 'Efectivo', icon: Banknote },
+                    { key: 'online', label: 'Transferencia', icon: Smartphone },
+                    { key: 'card', label: 'Tarjeta', icon: CreditCard },
+                    { key: 'on_delivery', label: 'Contra Entrega', icon: Truck },
+                  ] as const
+                ).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    onClick={() => togglePaymentMethodFilter(key)}
+                    className='flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-semibold transition-all'
+                    style={{
+                      backgroundColor: paymentMethodFilters.has(key) ? 'var(--color-accent)' : 'var(--color-background)',
+                      color: paymentMethodFilters.has(key) ? 'var(--color-on-accent)' : 'var(--color-text)',
+                    }}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
@@ -211,16 +471,17 @@ export function SalesView() {
               className='text-sm opacity-60'
               style={{ color: 'var(--color-text)' }}
             >
-              {sales.length} {sales.length === 1 ? 'venta' : 'ventas'}
+              {filteredSales.length} {filteredSales.length === 1 ? 'venta' : 'ventas'}
+              {hasActiveFilters && ` (de ${sales.length})`}
             </span>
           </div>
           <div className='space-y-3 max-h-[60vh] overflow-auto scrollbar-hide'>
-            {sales.length === 0 ? (
+            {filteredSales.length === 0 ? (
               <div className='text-center text-gray-400 py-8'>
-                Aún no hay ventas
+                {hasActiveFilters ? 'No hay ventas que coincidan con los filtros' : 'Aún no hay ventas'}
               </div>
             ) : (
-              sales.map((sale, index) => (
+              filteredSales.map((sale, index) => (
                 <div
                   key={sale.id}
                   onClick={() => setSelectedSale(sale)}
@@ -253,7 +514,7 @@ export function SalesView() {
                               : 'var(--color-text)',
                         }}
                       >
-                        #{sales.length - index}
+                        #{filteredSales.length - index}
                       </div>
                       {sale.payment_method === 'unpaid' && (
                         <span
@@ -425,22 +686,44 @@ export function SalesView() {
                 </h3>
                 <div className='space-y-2'>
                   {(() => {
-                    // Group items by combo_name
-                    const comboGroups: Record<string, typeof saleItems> = {};
+                    // Group items by combo_instance_id (for combos) or leave as standalone
+                    const comboInstanceGroups: Map<string, { comboName: string; items: typeof saleItems }> = new Map();
                     const standaloneItems: typeof saleItems = [];
 
                     saleItems.forEach((item) => {
-                      if (item.combo_name) {
-                        if (!comboGroups[item.combo_name]) {
-                          comboGroups[item.combo_name] = [];
+                      if (item.combo_instance_id && item.combo_name) {
+                        // New format: use combo_instance_id
+                        const existing = comboInstanceGroups.get(item.combo_instance_id);
+                        if (existing) {
+                          existing.items.push(item);
+                        } else {
+                          comboInstanceGroups.set(item.combo_instance_id, {
+                            comboName: item.combo_name,
+                            items: [item],
+                          });
                         }
-                        comboGroups[item.combo_name].push(item);
+                      } else if (item.combo_name && !item.combo_instance_id) {
+                        // Legacy format: fallback to old grouping by combo_name
+                        // Find or create a group for this combo_name
+                        let foundGroup = false;
+                        comboInstanceGroups.forEach((group, key) => {
+                          if (key.startsWith('legacy-') && group.comboName === item.combo_name) {
+                            group.items.push(item);
+                            foundGroup = true;
+                          }
+                        });
+                        if (!foundGroup) {
+                          comboInstanceGroups.set(`legacy-${item.combo_name}-${crypto.randomUUID()}`, {
+                            comboName: item.combo_name,
+                            items: [item],
+                          });
+                        }
                       } else {
                         standaloneItems.push(item);
                       }
                     });
 
-                    // Helper to create a signature for a combo instance
+                    // Helper to create a signature for a combo instance (for grouping identical combos)
                     const getItemSignature = (item: (typeof saleItems)[0]) => {
                       const removed = (item.removed_ingredients || [])
                         .sort()
@@ -448,80 +731,53 @@ export function SalesView() {
                       return `${item.product_name}|${removed}`;
                     };
 
-                    // Helper to detect combo size (products per combo instance)
-                    const detectComboSize = (items: typeof saleItems) => {
-                      if (items.length <= 1) return items.length;
-                      // Find when the first product name repeats
-                      const firstProductName = items[0].product_name;
-                      for (let i = 1; i < items.length; i++) {
-                        if (items[i].product_name === firstProductName) {
-                          return i;
-                        }
-                      }
-                      return items.length; // No repeat found, all items are one combo
-                    };
-
-                    // Helper to get signature for a combo instance (array of items)
+                    // Create signature for grouping identical combos
+                    // Sort by combo_slot_index to ensure consistent ordering for signature
                     const getComboInstanceSignature = (
                       items: typeof saleItems
                     ) => {
-                      return items.map(getItemSignature).join('::');
+                      // Sort by slot index for consistent signature (identical combos should match)
+                      const sortedItems = [...items].sort((a, b) => 
+                        (a.combo_slot_index ?? 0) - (b.combo_slot_index ?? 0)
+                      );
+                      return sortedItems.map(getItemSignature).join('::');
                     };
 
-                    // Process combo groups into unique instances with quantities
+                    // Process combo instances and group identical ones
                     type ComboInstance = {
                       comboName: string;
                       items: typeof saleItems;
                       quantity: number;
+                      unitPrice: number;
                       total: number;
                     };
 
                     const processedCombos: ComboInstance[] = [];
+                    const signatureMap = new Map<string, ComboInstance>();
 
-                    Object.entries(comboGroups).forEach(
-                      ([comboName, allItems]) => {
-                        const comboSize = detectComboSize(allItems);
-                        const instances: (typeof saleItems)[] = [];
-
-                        // Split items into individual combo instances
-                        for (let i = 0; i < allItems.length; i += comboSize) {
-                          instances.push(allItems.slice(i, i + comboSize));
-                        }
-
-                        // Group identical instances
-                        const instanceMap = new Map<
-                          string,
-                          { items: typeof saleItems; count: number }
-                        >();
-
-                        instances.forEach((instance) => {
-                          const signature = getComboInstanceSignature(instance);
-                          const existing = instanceMap.get(signature);
-                          if (existing) {
-                            existing.count++;
-                          } else {
-                            instanceMap.set(signature, {
-                              items: instance,
-                              count: 1,
-                            });
-                          }
-                        });
-
-                        // Convert to processed combos
-                        instanceMap.forEach(({ items, count }) => {
-                          const instanceTotal = items.reduce(
-                            (sum, item) => sum + item.subtotal,
-                            0
-                          );
-                          processedCombos.push({
-                            comboName,
-                            items,
-                            quantity: count,
-                            total: instanceTotal * count,
-                          });
-                        });
+                    comboInstanceGroups.forEach(({ comboName, items }) => {
+                      const signature = `${comboName}::${getComboInstanceSignature(items)}`;
+                      // Use combo_unit_price if available, otherwise fall back to sum of products
+                      const comboUnitPrice = items[0]?.combo_unit_price;
+                      const instanceTotal = comboUnitPrice !== undefined
+                        ? comboUnitPrice
+                        : items.reduce((sum, item) => sum + item.subtotal, 0);
+                      const existing = signatureMap.get(signature);
+                      if (existing) {
+                        existing.quantity++;
+                        existing.total += instanceTotal;
+                      } else {
+                        const newCombo: ComboInstance = {
+                          comboName,
+                          items,
+                          quantity: 1,
+                          unitPrice: instanceTotal,
+                          total: instanceTotal,
+                        };
+                        signatureMap.set(signature, newCombo);
+                        processedCombos.push(newCombo);
                       }
-                    );
+                    });
 
                     return (
                       <>
@@ -557,25 +813,30 @@ export function SalesView() {
                                 className='font-bold'
                                 style={{ color: 'var(--color-text)' }}
                               >
-                                {formatPrice(combo.total)}
+                                {combo.quantity > 1 ? (
+                                  <span>
+                                    {formatPrice(combo.unitPrice)} × {combo.quantity} = {formatPrice(combo.total)}
+                                  </span>
+                                ) : (
+                                  <span>{formatPrice(combo.total)}</span>
+                                )}
                               </div>
                             </div>
-                            {/* Combo products */}
+                            {/* Combo products - sorted by slot index for proper order */}
                             <div
                               className='pl-3 border-l-2 space-y-1'
                               style={{
                                 borderColor: 'var(--color-accent)',
                               }}
                             >
-                              {combo.items.map((item, itemIdx) => (
+                              {[...combo.items]
+                                .sort((a, b) => (a.combo_slot_index ?? 0) - (b.combo_slot_index ?? 0))
+                                .map((item, itemIdx) => (
                                 <div key={itemIdx}>
                                   <div
                                     className='text-sm'
                                     style={{ color: 'var(--color-text)' }}
                                   >
-                                    {combo.quantity > 1
-                                      ? `${combo.quantity}x `
-                                      : ''}
                                     {item.product_name}
                                   </div>
                                   {item.removed_ingredients &&

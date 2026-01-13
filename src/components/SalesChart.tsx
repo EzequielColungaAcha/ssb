@@ -124,9 +124,20 @@ export function SalesChart({ sales, saleItems }: SalesChartProps) {
         saleIdToDate.set(sale.id, new Date(sale.completed_at));
       });
 
+      // Track combo instances to count each combo once
+      const processedComboInstances = new Set<string>();
+
       saleItems.forEach((item) => {
         const saleDate = saleIdToDate.get(item.sale_id);
         if (!saleDate) return;
+
+        // Skip combo component items (they're part of a combo, not individual products)
+        // Count each combo instance once instead of counting each component
+        if (item.combo_name) {
+          const instanceId = item.combo_instance_id || item.id;
+          if (processedComboInstances.has(instanceId)) return;
+          processedComboInstances.add(instanceId);
+        }
 
         const { key, sortDate } = getTimeKey(saleDate);
 
