@@ -1055,25 +1055,58 @@ export function MetricsView() {
                       totalCost += product.production_cost * product.stock;
                     }
 
+                    // For materia prima products - check if they share ingredients
                     if (materiaPrimaProducts.length > 0) {
-                      const avgPrice =
-                        materiaPrimaProducts.reduce(
-                          (sum, p) => sum + p.price,
-                          0
-                        ) / materiaPrimaProducts.length;
-                      const avgCost =
-                        materiaPrimaProducts.reduce(
-                          (sum, p) => sum + p.production_cost,
-                          0
-                        ) / materiaPrimaProducts.length;
+                      // Get materia prima IDs for each product
+                      const productMPIds = materiaPrimaProducts.map((p) => {
+                        const links = productMateriaPrimaLinks.filter(
+                          (link) => link.product_id === p.id
+                        );
+                        return links.map((l) => l.materia_prima_id);
+                      });
 
-                      const materiaPrimaStock = await calculateAvailableStock(
-                        materiaPrimaProducts[0].id
-                      );
+                      // Check if any products share ingredients
+                      const allMPIds = productMPIds.flat();
+                      const uniqueMPIds = new Set(allMPIds);
+                      const hasSharedIngredients =
+                        allMPIds.length !== uniqueMPIds.size;
 
-                      totalStock += materiaPrimaStock;
-                      totalValue += avgPrice * materiaPrimaStock;
-                      totalCost += avgCost * materiaPrimaStock;
+                      if (hasSharedIngredients) {
+                        // Shared ingredients - find MAX
+                        let maxStock = 0;
+                        for (const product of materiaPrimaProducts) {
+                          const availableStock = await calculateAvailableStock(
+                            product.id
+                          );
+                          if (availableStock > maxStock) {
+                            maxStock = availableStock;
+                          }
+                        }
+                        // Use average price/cost for shared pool
+                        const avgPrice =
+                          materiaPrimaProducts.reduce(
+                            (sum, p) => sum + p.price,
+                            0
+                          ) / materiaPrimaProducts.length;
+                        const avgCost =
+                          materiaPrimaProducts.reduce(
+                            (sum, p) => sum + p.production_cost,
+                            0
+                          ) / materiaPrimaProducts.length;
+                        totalStock += maxStock;
+                        totalValue += avgPrice * maxStock;
+                        totalCost += avgCost * maxStock;
+                      } else {
+                        // Independent ingredients - SUM all
+                        for (const product of materiaPrimaProducts) {
+                          const availableStock = await calculateAvailableStock(
+                            product.id
+                          );
+                          totalStock += availableStock;
+                          totalValue += product.price * availableStock;
+                          totalCost += product.production_cost * availableStock;
+                        }
+                      }
                     }
 
                     setStats({
