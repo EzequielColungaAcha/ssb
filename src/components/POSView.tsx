@@ -47,7 +47,14 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Product, db, AppSettings, Sale, Combo, MateriaPrima } from '../lib/indexeddb';
+import {
+  Product,
+  db,
+  AppSettings,
+  Sale,
+  Combo,
+  MateriaPrima,
+} from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { useCashDrawer, ChangeBreakdown } from '../hooks/useCashDrawer';
@@ -169,17 +176,27 @@ function SortableProductItem({
     <div
       ref={setNodeRef}
       style={style}
-      className='relative'
+      className='relative h-full'
       {...(isLocked ? {} : { ...attributes, ...listeners })}
     >
       <button
         onContextMenu={(e) => e.preventDefault()}
-        onPointerDown={isLocked && !isOutOfStock ? handlePointerDown : undefined}
+        onPointerDown={
+          isLocked && !isOutOfStock ? handlePointerDown : undefined
+        }
         onPointerUp={isLocked && !isOutOfStock ? handlePointerUp : undefined}
-        onPointerLeave={isLocked && !isOutOfStock ? handlePointerLeave : undefined}
-        onClick={isLocked && !isOutOfStock ? undefined : !isOutOfStock ? () => onAddToCart(product) : undefined}
+        onPointerLeave={
+          isLocked && !isOutOfStock ? handlePointerLeave : undefined
+        }
+        onClick={
+          isLocked && !isOutOfStock
+            ? undefined
+            : !isOutOfStock
+            ? () => onAddToCart(product)
+            : undefined
+        }
         disabled={isOutOfStock}
-        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 relative ${
+        className={`w-full h-full p-6 rounded-lg shadow-md transition-all duration-200 relative flex flex-col justify-between ${
           isOutOfStock
             ? 'opacity-50 cursor-not-allowed'
             : isLocked
@@ -211,12 +228,16 @@ function SortableProductItem({
             <Beef size={14} style={{ color: 'var(--color-primary)' }} />
           </div>
         )}
-        <div className='text-lg font-bold mb-2'>{product.name}</div>
-        <div className='text-2xl font-bold mb-1'>
-          {formatPrice(product.price)}
+        <div>
+          <div className='text-lg font-bold mb-2'>{product.name}</div>
         </div>
-        <div className='text-sm opacity-90'>
-          Stock: {formatNumber(getStock(product))}
+        <div>
+          <div className='text-2xl font-bold mb-1'>
+            {formatPrice(product.price)}
+          </div>
+          <div className='text-sm opacity-90'>
+            Stock: {formatNumber(getStock(product))}
+          </div>
         </div>
       </button>
     </div>
@@ -260,13 +281,15 @@ function SortableComboItem({
     <div
       ref={setNodeRef}
       style={style}
-      className='relative'
+      className='relative h-full'
       {...(isLocked ? {} : { ...attributes, ...listeners })}
     >
       <button
-        onClick={isLocked && !isOutOfStock ? () => onOpenComboModal(combo) : undefined}
+        onClick={
+          isLocked && !isOutOfStock ? () => onOpenComboModal(combo) : undefined
+        }
         disabled={isOutOfStock}
-        className={`w-full p-6 rounded-lg shadow-md transition-all duration-200 text-left relative ${
+        className={`w-full h-full p-6 rounded-lg shadow-md transition-all duration-200 text-left relative flex flex-col justify-between ${
           isOutOfStock
             ? 'opacity-50 cursor-not-allowed'
             : isLocked
@@ -289,17 +312,21 @@ function SortableComboItem({
             SIN STOCK
           </div>
         )}
-        <div className='text-lg font-bold mb-2'>{combo.name}</div>
-        <div className='text-2xl font-bold mb-1'>
-          {combo.price_type === 'fixed'
-            ? formatPrice(combo.fixed_price || 0)
-            : combo.discount_type === 'percentage'
-            ? `-${combo.discount_value}%`
-            : `-${formatPrice(combo.discount_value || 0)}`}
+        <div>
+          <div className='text-lg font-bold mb-2'>{combo.name}</div>
         </div>
-        <div className='text-sm opacity-90'>
-          {combo.slots.length} producto
-          {combo.slots.length !== 1 ? 's' : ''}
+        <div>
+          <div className='text-2xl font-bold mb-1'>
+            {combo.price_type === 'fixed'
+              ? formatPrice(combo.fixed_price || 0)
+              : combo.discount_type === 'percentage'
+              ? `-${combo.discount_value}%`
+              : `-${formatPrice(combo.discount_value || 0)}`}
+          </div>
+          <div className='text-sm opacity-90'>
+            {combo.slots.length} producto
+            {combo.slots.length !== 1 ? 's' : ''}
+          </div>
         </div>
         <div
           className='absolute top-2 right-2 px-2 py-0.5 rounded text-xs font-semibold'
@@ -364,13 +391,17 @@ function SortableCategory({
 }
 
 export function POSView() {
-  const { products, refresh: refreshProducts, updateProduct, updateStock } = useProducts();
+  const {
+    products,
+    refresh: refreshProducts,
+    updateProduct,
+    updateStock,
+  } = useProducts();
   const { sales, createSale, updateSale } = useSales();
   const { calculateOptimalChange, processChange, processCashReceived } =
     useCashDrawer();
   const {
     checkStockAvailability,
-    deductMateriaPrimaStock,
     calculateAvailableStock,
     refresh: refreshMateriaPrima,
     getProductMateriaPrima,
@@ -429,6 +460,7 @@ export function POSView() {
   const [kdsEditingAddress, setKdsEditingAddress] = useState<string | null>(
     null
   );
+  const kdsAddressInputRef = useRef<HTMLInputElement>(null);
 
   // KDS mark as paid state
   const [kdsMarkingPaid, setKdsMarkingPaid] = useState<string | null>(null); // sale_number
@@ -521,6 +553,7 @@ export function POSView() {
   const [editOrderType, setEditOrderType] = useState<'pickup' | 'delivery'>(
     'pickup'
   );
+  const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
 
   // Edit ingredient sub-modal state (within edit order modal)
   const [editIngredientItemIndex, setEditIngredientItemIndex] = useState<
@@ -1001,7 +1034,10 @@ export function POSView() {
           if (otherItem.isCombo && otherItem.comboSelections) {
             for (const sel of otherItem.comboSelections) {
               const current = stockRequirements.get(sel.productId) || 0;
-              stockRequirements.set(sel.productId, current + otherItem.quantity);
+              stockRequirements.set(
+                sel.productId,
+                current + otherItem.quantity
+              );
             }
           } else if (!otherItem.isCombo) {
             const current = stockRequirements.get(otherItem.id) || 0;
@@ -1560,9 +1596,10 @@ export function POSView() {
         setEditScheduledTime('');
       }
 
-      // Set customer name and order type
+      // Set customer name, order type, and delivery address
       setEditCustomerName(order.customer_name || '');
       setEditOrderType(order.order_type || 'pickup');
+      setEditDeliveryAddress(order.delivery_address || '');
 
       // Open edit modal
       setShowEditModal(true);
@@ -1579,6 +1616,7 @@ export function POSView() {
     setEditScheduledTime('');
     setEditCustomerName('');
     setEditOrderType('pickup');
+    setEditDeliveryAddress('');
   };
 
   const updateEditItemQuantity = (index: number, delta: number) => {
@@ -1631,6 +1669,8 @@ export function POSView() {
             scheduled_time: scheduledTimeISO,
             customer_name: editCustomerName || null,
             order_type: editOrderType,
+            delivery_address:
+              editOrderType === 'delivery' ? editDeliveryAddress || null : null,
           }),
         }
       );
@@ -1766,11 +1806,14 @@ export function POSView() {
               selIndex++
             ) {
               const selection = cartItem.comboSelections[selIndex];
+              const comboProduct = products.find(
+                (p) => p.id === selection.productId
+              );
               items.push({
                 product_id: selection.productId,
                 product_name: selection.productName,
                 product_price: selection.productPrice,
-                production_cost: 0,
+                production_cost: comboProduct?.production_cost || 0,
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
                 combo_name: cartItem.comboName,
@@ -1847,7 +1890,8 @@ export function POSView() {
               continue;
             }
           }
-          const current = materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+          const current =
+            materiaPrimaDeductions.get(link.materia_prima_id) || 0;
           materiaPrimaDeductions.set(
             link.materia_prima_id,
             current + link.quantity * quantity
@@ -1888,7 +1932,8 @@ export function POSView() {
               selection.removedIngredients || []
             );
           } else {
-            const current = productStockDeductions.get(selection.productId) || 0;
+            const current =
+              productStockDeductions.get(selection.productId) || 0;
             productStockDeductions.set(
               selection.productId,
               current + comboItem.quantity
@@ -2012,11 +2057,14 @@ export function POSView() {
               selIndex++
             ) {
               const selection = cartItem.comboSelections[selIndex];
+              const comboProduct = products.find(
+                (p) => p.id === selection.productId
+              );
               items.push({
                 product_id: selection.productId,
                 product_name: selection.productName,
                 product_price: selection.productPrice,
-                production_cost: 0,
+                production_cost: comboProduct?.production_cost || 0,
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
                 combo_name: cartItem.comboName,
@@ -2082,7 +2130,8 @@ export function POSView() {
               continue;
             }
           }
-          const current = materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+          const current =
+            materiaPrimaDeductions.get(link.materia_prima_id) || 0;
           materiaPrimaDeductions.set(
             link.materia_prima_id,
             current + link.quantity * quantity
@@ -2123,7 +2172,8 @@ export function POSView() {
               selection.removedIngredients || []
             );
           } else {
-            const current = productStockDeductions.get(selection.productId) || 0;
+            const current =
+              productStockDeductions.get(selection.productId) || 0;
             productStockDeductions.set(
               selection.productId,
               current + comboItem.quantity
@@ -2595,17 +2645,8 @@ export function POSView() {
 
         // Check each slot - a combo is out of stock if any slot has no available products
         for (const slot of combo.slots) {
-          // Get products for this slot
-          let slotProductIds: string[] = [];
-          if (slot.is_dynamic && slot.category) {
-            // Dynamic slot: get all products in the category
-            slotProductIds = products
-              .filter((p) => p.category === slot.category && p.active)
-              .map((p) => p.id);
-          } else if (slot.product_ids && slot.product_ids.length > 0) {
-            // Fixed products slot
-            slotProductIds = slot.product_ids;
-          }
+          // Get products for this slot (use product_ids for both dynamic and fixed slots)
+          const slotProductIds = slot.product_ids || [];
 
           // Check if at least one product in this slot has stock
           let slotHasAvailableProduct = false;
@@ -2672,6 +2713,13 @@ export function POSView() {
       }
     };
   }, [showKdsPanel, fetchKdsOrders, connectKdsWebSocket]);
+
+  // Focus address input when editing modal opens
+  useEffect(() => {
+    if (kdsEditingAddress && kdsAddressInputRef.current) {
+      kdsAddressInputRef.current.focus();
+    }
+  }, [kdsEditingAddress]);
 
   return (
     <DndContext
@@ -2784,14 +2832,22 @@ export function POSView() {
                           strategy={rectSortingStrategy}
                           disabled={isLayoutLocked}
                         >
-                          <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                          <div
+                            className={`grid gap-4 ${
+                              showPayment
+                                ? 'grid-cols-1'
+                                : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-3'
+                            }`}
+                          >
                             {sortedCombos.map((combo) => (
                               <SortableComboItem
                                 key={combo.id}
                                 combo={combo}
                                 isLocked={isLayoutLocked}
                                 onOpenComboModal={openComboModal}
-                                isOutOfStock={comboStockStatus[combo.id] === false}
+                                isOutOfStock={
+                                  comboStockStatus[combo.id] === false
+                                }
                               />
                             ))}
                           </div>
@@ -2816,7 +2872,13 @@ export function POSView() {
                         strategy={rectSortingStrategy}
                         disabled={isLayoutLocked}
                       >
-                        <div className='grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4'>
+                        <div
+                          className={`grid gap-4 ${
+                            showPayment
+                              ? 'grid-cols-1'
+                              : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-3'
+                          }`}
+                        >
                           {categoryProducts.map((product) => (
                             <SortableProductItem
                               key={product.id}
@@ -3539,7 +3601,7 @@ export function POSView() {
                     type='text'
                     value={deliveryAddress}
                     onChange={(e) => setDeliveryAddress(e.target.value)}
-                    placeholder='Ej: Calle 123, Piso 4'
+                    placeholder='Ej: Calle 4 e/ 5 y 7 n276'
                     className='w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2'
                     style={{
                       backgroundColor: 'var(--color-background)',
@@ -3608,7 +3670,7 @@ export function POSView() {
 
       {/* KDS Orders Panel */}
       {showKdsPanel && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm'>
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4'>
           <div
             className='w-full max-w-4xl max-h-[90vh] rounded-xl shadow-2xl overflow-hidden flex flex-col'
             style={{ backgroundColor: 'var(--color-background-secondary)' }}
@@ -3668,7 +3730,7 @@ export function POSView() {
                   <p>No hay pedidos en cocina</p>
                 </div>
               ) : (
-                <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+                <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'>
                   {kdsOrders.map((order) => (
                     <div
                       key={order.id}
@@ -3688,8 +3750,8 @@ export function POSView() {
                             : 'var(--color-primary)',
                       }}
                     >
-                      <div className='flex items-center justify-between mb-3'>
-                        <div>
+                      <div className='flex items-start justify-between mb-3'>
+                        <div className='flex flex-col'>
                           <span
                             className='font-bold text-lg'
                             style={{ color: 'var(--color-text)' }}
@@ -3730,70 +3792,21 @@ export function POSView() {
                             </span>
                           )}
                           {order.order_type === 'delivery' && (
-                            <div className='mt-1'>
-                              {kdsEditingAddress === order.id ? (
-                                <div className='flex items-center gap-1'>
-                                  <input
-                                    type='text'
-                                    value={kdsAddressValue}
-                                    onChange={(e) =>
-                                      setKdsAddressValue(e.target.value)
-                                    }
-                                    className='text-xs px-2 py-1 rounded border flex-1'
-                                    style={{
-                                      backgroundColor:
-                                        'var(--color-background)',
-                                      borderColor:
-                                        'var(--color-background-accent)',
-                                      color: 'var(--color-text)',
-                                    }}
-                                    placeholder='Dirección...'
-                                  />
-                                  <button
-                                    onClick={() =>
-                                      updateKdsOrderAddress(
-                                        order.id,
-                                        kdsAddressValue
-                                      )
-                                    }
-                                    className='text-xs px-2 py-1 rounded'
-                                    style={{
-                                      backgroundColor: 'var(--color-primary)',
-                                      color: 'var(--color-on-primary)',
-                                    }}
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    onClick={() => setKdsEditingAddress(null)}
-                                    className='text-xs px-2 py-1 rounded'
-                                    style={{
-                                      backgroundColor:
-                                        'var(--color-background-accent)',
-                                      color: 'var(--color-text)',
-                                    }}
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <div
-                                  className='text-xs italic flex items-center gap-1 cursor-pointer hover:opacity-80'
-                                  style={{
-                                    color: 'var(--color-text)',
-                                    opacity: 0.8,
-                                  }}
-                                  onClick={() => {
-                                    setKdsEditingAddress(order.id);
-                                    setKdsAddressValue(
-                                      order.delivery_address || ''
-                                    );
-                                  }}
-                                >
-                                  📍 {order.delivery_address || 'Sin dirección'}
-                                  <Pencil size={10} />
-                                </div>
-                              )}
+                            <div
+                              className='mt-1 text-xs italic flex items-center gap-1 cursor-pointer hover:opacity-80'
+                              style={{
+                                color: 'var(--color-text)',
+                                opacity: 0.8,
+                              }}
+                              onClick={() => {
+                                setKdsEditingAddress(order.id);
+                                setKdsAddressValue(
+                                  order.delivery_address || ''
+                                );
+                              }}
+                            >
+                              📍 {order.delivery_address || 'Sin dirección'}
+                              <Pencil size={10} />
                             </div>
                           )}
                           {order.scheduled_time && (
@@ -4064,7 +4077,7 @@ export function POSView() {
                                                     }
                                               )
                                             }
-                                            className='p-1 rounded hover:opacity-80'
+                                            className='flex items-center justify-center rounded hover:opacity-80'
                                             style={{
                                               backgroundColor: isEditingThis
                                                 ? 'var(--color-accent)'
@@ -4075,7 +4088,7 @@ export function POSView() {
                                             }}
                                             title='Editar ingredientes'
                                           >
-                                            <Beef size={12} />
+                                            <Beef size={18} />
                                           </button>
                                         )}
                                       </div>
@@ -4209,7 +4222,7 @@ export function POSView() {
                                                 }
                                           )
                                         }
-                                        className='p-1 rounded hover:opacity-80'
+                                        className='flex items-center justify-center  rounded hover:opacity-80'
                                         style={{
                                           backgroundColor: isEditingThis
                                             ? 'var(--color-accent)'
@@ -4220,7 +4233,7 @@ export function POSView() {
                                         }}
                                         title='Editar ingredientes'
                                       >
-                                        <Beef size={12} />
+                                        <Beef size={18} />
                                       </button>
                                     )}
                                   </div>
@@ -4284,57 +4297,77 @@ export function POSView() {
                       </div>
 
                       <div
-                        className='flex justify-between items-center pt-3 border-t'
+                        className='flex flex-col justify-between items-center pt-3 border-t gap-2'
                         style={{
                           borderColor: 'var(--color-background-accent)',
                         }}
                       >
-                        <span
-                          className='font-bold'
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {formatPrice(order.total)}
-                        </span>
-
-                        {(order.status === 'pending' ||
-                          order.status === 'on_delivery') && (
-                          <div className='flex items-center gap-2'>
-                            {order.status === 'pending' && (
-                              <button
-                                onClick={() => loadOrderForEdit(order)}
-                                className='p-1.5 rounded-lg transition-all hover:opacity-80'
-                                style={{
-                                  backgroundColor:
-                                    'var(--color-background-accent)',
-                                }}
-                                title='Editar pedido'
-                              >
-                                <Pencil
-                                  size={16}
-                                  style={{ color: 'var(--color-text)' }}
-                                />
-                              </button>
-                            )}
-                            {/* For delivery orders: pending -> on_delivery -> completed */}
-                            {order.order_type === 'delivery' ? (
-                              order.status === 'pending' ? (
-                                <button
-                                  onClick={() =>
-                                    updateKdsOrderStatus(
-                                      order.id,
-                                      'on_delivery'
-                                    )
-                                  }
-                                  className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
-                                  style={{
-                                    backgroundColor: '#3b82f6',
-                                    color: 'white',
-                                  }}
-                                >
-                                  <Truck size={14} />
-                                  Enviar
-                                </button>
+                        <div className='flex w-full justify-between items-center'>
+                          <span
+                            className='font-bold'
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {formatPrice(order.total)}
+                          </span>
+                          {order.status === 'pending' && (
+                            <button
+                              onClick={() => loadOrderForEdit(order)}
+                              className='flex rounded-lg transition-all hover:opacity-80 items-center justify-center'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-accent)',
+                              }}
+                              title='Editar pedido'
+                            >
+                              <Pencil
+                                size={18}
+                                style={{ color: 'var(--color-text)' }}
+                              />
+                            </button>
+                          )}
+                        </div>
+                        <div>
+                          {(order.status === 'pending' ||
+                            order.status === 'on_delivery') && (
+                            <div className='flex items-center gap-2'>
+                              {/* For delivery orders: pending -> on_delivery -> completed */}
+                              {order.order_type === 'delivery' ? (
+                                order.status === 'pending' ? (
+                                  <button
+                                    onClick={() =>
+                                      updateKdsOrderStatus(
+                                        order.id,
+                                        'on_delivery'
+                                      )
+                                    }
+                                    className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
+                                    style={{
+                                      backgroundColor: '#3b82f6',
+                                      color: 'white',
+                                    }}
+                                  >
+                                    <Truck size={14} />
+                                    Enviar
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() =>
+                                      updateKdsOrderStatus(
+                                        order.id,
+                                        'completed'
+                                      )
+                                    }
+                                    className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
+                                    style={{
+                                      backgroundColor: 'var(--color-primary)',
+                                      color: 'var(--color-on-primary)',
+                                    }}
+                                  >
+                                    Entregado
+                                  </button>
+                                )
                               ) : (
+                                /* For pickup orders: pending -> completed directly */
                                 <button
                                   onClick={() =>
                                     updateKdsOrderStatus(order.id, 'completed')
@@ -4345,47 +4378,111 @@ export function POSView() {
                                     color: 'var(--color-on-primary)',
                                   }}
                                 >
-                                  Entregado
+                                  Marcar Entregado
                                 </button>
-                              )
-                            ) : (
-                              /* For pickup orders: pending -> completed directly */
-                              <button
-                                onClick={() =>
-                                  updateKdsOrderStatus(order.id, 'completed')
-                                }
-                                className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90'
-                                style={{
-                                  backgroundColor: 'var(--color-primary)',
-                                  color: 'var(--color-on-primary)',
-                                }}
-                              >
-                                Marcar Entregado
-                              </button>
-                            )}
-                            {/* Mark as Paid button for unpaid orders */}
-                            {kdsUnpaidSales[order.sale_number] && (
-                              <button
-                                onClick={() =>
-                                  openKdsMarkPaidModal(order.sale_number)
-                                }
-                                className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
-                                style={{
-                                  backgroundColor: 'var(--color-accent)',
-                                  color: 'var(--color-on-accent)',
-                                }}
-                              >
-                                <DollarSign size={14} />
-                                Cobrar
-                              </button>
-                            )}
-                          </div>
-                        )}
+                              )}
+                              {/* Mark as Paid button for unpaid orders */}
+                              {kdsUnpaidSales[order.sale_number] && (
+                                <button
+                                  onClick={() =>
+                                    openKdsMarkPaidModal(order.sale_number)
+                                  }
+                                  className='px-3 py-1.5 rounded-lg text-sm font-semibold transition-all hover:opacity-90 flex items-center gap-1'
+                                  style={{
+                                    backgroundColor: 'var(--color-accent)',
+                                    color: 'var(--color-on-accent)',
+                                  }}
+                                >
+                                  <DollarSign size={14} />
+                                  Cobrar
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KDS Address Edit Modal */}
+      {kdsEditingAddress && (
+        <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4'>
+          <div
+            className='w-full max-w-md rounded-xl shadow-2xl overflow-hidden'
+            style={{ backgroundColor: 'var(--color-background-secondary)' }}
+          >
+            <div
+              className='px-6 py-4 flex items-center justify-between border-b'
+              style={{ borderColor: 'var(--color-background-accent)' }}
+            >
+              <div className='flex items-center gap-3'>
+                <Truck size={24} style={{ color: 'var(--color-primary)' }} />
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Dirección de Entrega
+                </h2>
+              </div>
+              <button
+                onClick={() => setKdsEditingAddress(null)}
+                className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
+                style={{ backgroundColor: 'var(--color-background-accent)' }}
+              >
+                <X size={20} style={{ color: 'var(--color-text)' }} />
+              </button>
+            </div>
+
+            <div className='p-6'>
+              <input
+                ref={kdsAddressInputRef}
+                type='text'
+                value={kdsAddressValue}
+                onChange={(e) => setKdsAddressValue(e.target.value)}
+                placeholder='Ej: Calle 4 e/ 5 y 7 n276'
+                className='w-full p-3 rounded-lg text-lg mb-4'
+                style={{
+                  backgroundColor: 'var(--color-background)',
+                  color: 'var(--color-text)',
+                  border: '2px solid var(--color-background-accent)',
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    updateKdsOrderAddress(kdsEditingAddress, kdsAddressValue);
+                  }
+                }}
+              />
+
+              <div className='flex gap-3'>
+                <button
+                  onClick={() => setKdsEditingAddress(null)}
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() =>
+                    updateKdsOrderAddress(kdsEditingAddress, kdsAddressValue)
+                  }
+                  className='flex-1 py-3 rounded-lg font-bold'
+                  style={{
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'var(--color-on-primary)',
+                  }}
+                >
+                  Guardar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4955,9 +5052,9 @@ export function POSView() {
 
       {/* Full-Screen Edit Order Modal */}
       {showEditModal && editingKdsOrder && (
-        <div className='fixed inset-0 z-50 flex flex-col bg-black/50 backdrop-blur-sm'>
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4'>
           <div
-            className='w-full h-full flex flex-col'
+            className='w-full h-full md:max-w-2xl md:max-h-[90vh] md:rounded-xl flex flex-col overflow-hidden'
             style={{ backgroundColor: 'var(--color-background)' }}
           >
             {/* Header */}
@@ -5104,6 +5201,40 @@ export function POSView() {
                   </button>
                 </div>
               </div>
+
+              {/* Delivery Address - only show when delivery is selected */}
+              {editOrderType === 'delivery' && (
+                <div
+                  className='mb-6 p-4 rounded-lg'
+                  style={{
+                    backgroundColor: 'var(--color-background-secondary)',
+                  }}
+                >
+                  <label
+                    className='block text-sm font-semibold mb-2'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <Truck
+                      size={16}
+                      className='inline mr-2'
+                      style={{ color: 'var(--color-accent)' }}
+                    />
+                    Dirección de Entrega
+                  </label>
+                  <input
+                    type='text'
+                    value={editDeliveryAddress}
+                    onChange={(e) => setEditDeliveryAddress(e.target.value)}
+                    placeholder='Ej: Calle 4 e/ 5 y 7 n276'
+                    className='w-full p-3 rounded-lg text-lg'
+                    style={{
+                      backgroundColor: 'var(--color-background)',
+                      color: 'var(--color-text)',
+                      border: '2px solid var(--color-background-accent)',
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Items */}
               <div className='space-y-4'>
