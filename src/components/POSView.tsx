@@ -1156,6 +1156,7 @@ export function POSView() {
       production_cost: number;
       quantity: number;
       removedIngredients: string[];
+      category: string;
       combo_name?: string;
     }>,
     total: number,
@@ -1185,6 +1186,7 @@ export function POSView() {
             product_price: item.product_price,
             removed_ingredients: item.removedIngredients || [],
             combo_name: item.combo_name || null,
+            category: item.category || 'otros',
           })),
           total,
           payment_method: paymentMethod,
@@ -1193,6 +1195,7 @@ export function POSView() {
           order_type: orderTypeParam || null,
           delivery_address:
             orderTypeParam === 'delivery' ? deliveryAddressParam || null : null,
+          created_at: new Date().toISOString(),
         }),
       });
 
@@ -1788,6 +1791,7 @@ export function POSView() {
         production_cost: number;
         quantity: number;
         removedIngredients: string[];
+        category: string;
         combo_name?: string;
         combo_instance_id?: string;
         combo_slot_index?: number;
@@ -1816,6 +1820,7 @@ export function POSView() {
                 production_cost: comboProduct?.production_cost || 0,
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
+                category: comboProduct?.category || 'otros',
                 combo_name: cartItem.comboName,
                 combo_instance_id: comboInstanceId,
                 combo_slot_index: selIndex,
@@ -1832,6 +1837,7 @@ export function POSView() {
             production_cost: cartItem.production_cost,
             quantity: cartItem.quantity,
             removedIngredients: cartItem.removedIngredients || [],
+            category: cartItem.category,
           });
         }
       }
@@ -2041,6 +2047,7 @@ export function POSView() {
         production_cost: number;
         quantity: number;
         removedIngredients: string[];
+        category: string;
         combo_name?: string;
         combo_instance_id?: string;
         combo_slot_index?: number;
@@ -2067,6 +2074,7 @@ export function POSView() {
                 production_cost: comboProduct?.production_cost || 0,
                 quantity: 1,
                 removedIngredients: selection.removedIngredients || [],
+                category: comboProduct?.category || 'otros',
                 combo_name: cartItem.comboName,
                 combo_instance_id: comboInstanceId,
                 combo_slot_index: selIndex,
@@ -2082,6 +2090,7 @@ export function POSView() {
             production_cost: cartItem.production_cost,
             quantity: cartItem.quantity,
             removedIngredients: cartItem.removedIngredients || [],
+            category: cartItem.category,
           });
         }
       }
@@ -2835,7 +2844,7 @@ export function POSView() {
                           <div
                             className={`grid gap-4 ${
                               showPayment
-                                ? 'grid-cols-1'
+                                ? 'grid-cols-1 sm:grid-cols-2'
                                 : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-3'
                             }`}
                           >
@@ -2875,7 +2884,7 @@ export function POSView() {
                         <div
                           className={`grid gap-4 ${
                             showPayment
-                              ? 'grid-cols-1'
+                              ? 'grid-cols-1 sm:grid-cols-2'
                               : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-3'
                           }`}
                         >
@@ -2904,7 +2913,7 @@ export function POSView() {
 
         <div
           className={`shadow-xl p-6 flex flex-col transition-all duration-300 ${
-            showPayment ? 'w-[720px]' : 'w-96'
+            showPayment ? 'w-[600px]' : 'w-96'
           }`}
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
@@ -2978,7 +2987,7 @@ export function POSView() {
             {/* Cart Column */}
             <div
               className={`${
-                showPayment ? 'w-1/2 border-r pr-4' : 'flex-1'
+                showPayment ? 'w-2/4 border-r pr-4' : 'flex-1'
               } overflow-auto scrollbar-hide ${showPayment ? '' : 'mb-6'}`}
               style={{
                 borderColor: showPayment
@@ -3147,7 +3156,7 @@ export function POSView() {
 
             {/* Payment Column - only visible when showPayment is true */}
             {showPayment && (
-              <div className='w-1/2 overflow-auto scrollbar-hide flex flex-col'>
+              <div className='w-3/4 overflow-auto scrollbar-hide flex flex-col'>
                 {/* Subtotal and delivery charge breakdown */}
                 {currentDeliveryCharge > 0 && (
                   <div
