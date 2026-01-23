@@ -146,6 +146,11 @@ export function useMateriaPrima() {
       materia_prima_id: string;
       quantity: number;
       removable: boolean;
+      is_variable?: boolean;
+      min_quantity?: number;
+      max_quantity?: number;
+      default_quantity?: number;
+      price_per_unit?: number;
     }>
   ) => {
     try {
@@ -169,6 +174,11 @@ export function useMateriaPrima() {
           quantity: item.quantity,
           removable: item.removable,
           created_at: new Date().toISOString(),
+          is_variable: item.is_variable,
+          min_quantity: item.min_quantity,
+          max_quantity: item.max_quantity,
+          default_quantity: item.default_quantity,
+          price_per_unit: item.price_per_unit,
         };
         await db.add('product_materia_prima', newLink);
       }
@@ -196,7 +206,11 @@ export function useMateriaPrima() {
           link.materia_prima_id
         );
         if (mp) {
-          totalCost += mp.cost_per_unit * link.quantity;
+          // For variable ingredients, use default_quantity for cost calculation
+          const qty = link.is_variable
+            ? (link.default_quantity ?? 1)
+            : link.quantity;
+          totalCost += mp.cost_per_unit * qty;
         }
       }
 
@@ -320,7 +334,11 @@ export function useMateriaPrima() {
             return 0;
           }
 
-          const possibleUnits = Math.floor(mp.stock / link.quantity);
+          // For variable ingredients, use min_quantity for stock calculation
+          const qty = link.is_variable
+            ? (link.min_quantity ?? 1)
+            : link.quantity;
+          const possibleUnits = Math.floor(mp.stock / qty);
           minStock = Math.min(minStock, possibleUnits);
         }
 

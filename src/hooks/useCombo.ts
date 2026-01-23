@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { db, Combo, ComboSlot, Product } from '../lib/indexeddb';
 
+export interface VariableIngredientSelection {
+  materia_prima_id: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+}
+
 export interface ComboSelection {
   slotId: string;
   slotName: string;
@@ -8,6 +15,7 @@ export interface ComboSelection {
   productName: string;
   productPrice: number;
   removedIngredients: string[];
+  variableIngredients?: VariableIngredientSelection[];
 }
 
 export function useCombo() {

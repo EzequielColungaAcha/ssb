@@ -44,7 +44,16 @@ export function ProductsView() {
     uses_materia_prima: false,
   });
   const [materiaPrimaItems, setMateriaPrimaItems] = useState<
-    Array<{ materia_prima_id: string; quantity: string; removable: boolean }>
+    Array<{
+      materia_prima_id: string;
+      quantity: string;
+      removable: boolean;
+      is_variable: boolean;
+      min_quantity: string;
+      max_quantity: string;
+      default_quantity: string;
+      price_per_unit: string;
+    }>
   >([]);
 
   const categories = [
@@ -124,6 +133,11 @@ export function ProductsView() {
           materia_prima_id: item.materia_prima_id,
           quantity: parseFloat(item.quantity),
           removable: item.removable,
+          is_variable: item.is_variable,
+          min_quantity: item.is_variable ? parseFloat(item.min_quantity) : undefined,
+          max_quantity: item.is_variable ? parseFloat(item.max_quantity) : undefined,
+          default_quantity: item.is_variable ? parseFloat(item.default_quantity) : undefined,
+          price_per_unit: item.is_variable ? parseFloat(item.price_per_unit) : undefined,
         }));
         await setProductMateriaPrima(productId, items);
 
@@ -175,6 +189,11 @@ export function ProductsView() {
           materia_prima_id: item.materia_prima_id,
           quantity: item.quantity.toString(),
           removable: item.removable ?? true,
+          is_variable: item.is_variable ?? false,
+          min_quantity: (item.min_quantity ?? 1).toString(),
+          max_quantity: (item.max_quantity ?? 5).toString(),
+          default_quantity: (item.default_quantity ?? 1).toString(),
+          price_per_unit: (item.price_per_unit ?? 0).toString(),
         }))
       );
     } else {
@@ -228,20 +247,42 @@ export function ProductsView() {
         products
           .filter((p) => p.active)
           .map(async (p) => {
-            let ingredients: Array<{ id: string; name: string }> = [];
+            let ingredients: Array<{
+              id: string;
+              name: string;
+              is_variable?: boolean;
+              min_quantity?: number;
+              max_quantity?: number;
+              default_quantity?: number;
+              price_per_unit?: number;
+            }> = [];
 
             if (p.uses_materia_prima) {
               const productIngredients = await getProductMateriaPrima(p.id);
               ingredients = productIngredients
-                .filter((i) => i.removable)
+                .filter((i) => i.removable || i.is_variable)
                 .map((i) => {
                   const mp = materiaPrima.find(
                     (m) => m.id === i.materia_prima_id
                   );
-                  return {
+                  const base = {
                     id: i.materia_prima_id,
                     name: mp?.name || 'Desconocido',
                   };
+
+                  // Include variable ingredient fields if applicable
+                  if (i.is_variable) {
+                    return {
+                      ...base,
+                      is_variable: true,
+                      min_quantity: i.min_quantity ?? 1,
+                      max_quantity: i.max_quantity ?? 5,
+                      default_quantity: i.default_quantity ?? 1,
+                      price_per_unit: i.price_per_unit ?? 0,
+                    };
+                  }
+
+                  return base;
                 });
             }
 
@@ -277,7 +318,16 @@ export function ProductsView() {
   const addMateriaPrimaItem = () => {
     setMateriaPrimaItems([
       ...materiaPrimaItems,
-      { materia_prima_id: '', quantity: '', removable: true },
+      {
+        materia_prima_id: '',
+        quantity: '',
+        removable: true,
+        is_variable: false,
+        min_quantity: '1',
+        max_quantity: '5',
+        default_quantity: '1',
+        price_per_unit: '',
+      },
     ]);
   };
 
@@ -287,11 +337,19 @@ export function ProductsView() {
 
   const updateMateriaPrimaItem = (
     index: number,
-    field: 'materia_prima_id' | 'quantity' | 'removable',
+    field:
+      | 'materia_prima_id'
+      | 'quantity'
+      | 'removable'
+      | 'is_variable'
+      | 'min_quantity'
+      | 'max_quantity'
+      | 'default_quantity'
+      | 'price_per_unit',
     value: string | boolean
   ) => {
     const updated = [...materiaPrimaItems];
-    if (field === 'removable') {
+    if (field === 'removable' || field === 'is_variable') {
       updated[index][field] = value as boolean;
     } else {
       updated[index][field] = value as string;
@@ -512,84 +570,248 @@ export function ProductsView() {
                       No hay ingredientes. Hacé clic en "Agregar" para añadir.
                     </p>
                   ) : (
-                    <div className='space-y-2'>
+                    <div className='space-y-3'>
                       {materiaPrimaItems.map((item, index) => (
-                        <div key={index} className='flex gap-2'>
-                          <select
-                            value={item.materia_prima_id}
-                            onChange={(e) =>
-                              updateMateriaPrimaItem(
-                                index,
-                                'materia_prima_id',
-                                e.target.value
-                              )
-                            }
-                            required
-                            className='flex-1 px-3 py-2 border rounded-lg'
-                            style={{
-                              backgroundColor: 'var(--color-background-accent)',
-                              color: 'var(--color-text)',
-                              borderColor: 'var(--color-text)',
-                            }}
-                          >
-                            <option value=''>Seleccionar ingrediente</option>
-                            {materiaPrima.map((mp) => (
-                              <option key={mp.id} value={mp.id}>
-                                {mp.name} (
-                                {mp.unit === 'units' ? 'unidades' : 'kg'})
-                              </option>
-                            ))}
-                          </select>
-                          <input
-                            type='number'
-                            step='0.001'
-                            required
-                            value={item.quantity}
-                            onChange={(e) =>
-                              updateMateriaPrimaItem(
-                                index,
-                                'quantity',
-                                e.target.value
-                              )
-                            }
-                            placeholder='Cantidad'
-                            className='w-32 px-3 py-2 border rounded-lg'
-                            style={{
-                              backgroundColor: 'var(--color-background-accent)',
-                              color: 'var(--color-text)',
-                              borderColor: 'var(--color-text)',
-                            }}
-                          />
-                          <label
-                            className='flex items-center gap-1 px-2 cursor-pointer'
-                            title='Puede quitarse en POS'
-                          >
-                            <input
-                              type='checkbox'
-                              checked={item.removable}
+                        <div
+                          key={index}
+                          className='p-3 rounded-lg border'
+                          style={{
+                            backgroundColor: 'var(--color-background-accent)',
+                            borderColor: item.is_variable
+                              ? 'var(--color-primary)'
+                              : 'transparent',
+                          }}
+                        >
+                          <div className='flex gap-2 items-center'>
+                            <select
+                              value={item.materia_prima_id}
                               onChange={(e) =>
                                 updateMateriaPrimaItem(
                                   index,
-                                  'removable',
+                                  'materia_prima_id',
+                                  e.target.value
+                                )
+                              }
+                              required
+                              className='flex-1 px-3 py-2 border rounded-lg'
+                              style={{
+                                backgroundColor:
+                                  'var(--color-background-secondary)',
+                                color: 'var(--color-text)',
+                                borderColor: 'var(--color-text)',
+                              }}
+                            >
+                              <option value=''>Seleccionar ingrediente</option>
+                              {materiaPrima.map((mp) => (
+                                <option key={mp.id} value={mp.id}>
+                                  {mp.name} (
+                                  {mp.unit === 'units' ? 'unidades' : 'kg'})
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type='number'
+                              step='0.001'
+                              required={!item.is_variable}
+                              disabled={item.is_variable}
+                              value={item.is_variable ? '' : item.quantity}
+                              onChange={(e) =>
+                                updateMateriaPrimaItem(
+                                  index,
+                                  'quantity',
+                                  e.target.value
+                                )
+                              }
+                              placeholder={
+                                item.is_variable ? 'Variable' : 'Cantidad'
+                              }
+                              className='w-28 px-3 py-2 border rounded-lg'
+                              style={{
+                                backgroundColor: item.is_variable
+                                  ? 'var(--color-background-accent)'
+                                  : 'var(--color-background-secondary)',
+                                color: 'var(--color-text)',
+                                borderColor: 'var(--color-text)',
+                                opacity: item.is_variable ? 0.5 : 1,
+                              }}
+                            />
+                            <label
+                              className='flex items-center gap-1 px-2 cursor-pointer'
+                              title='Puede quitarse en POS'
+                            >
+                              <input
+                                type='checkbox'
+                                checked={item.removable}
+                                onChange={(e) =>
+                                  updateMateriaPrimaItem(
+                                    index,
+                                    'removable',
+                                    e.target.checked
+                                  )
+                                }
+                                className='w-4 h-4'
+                              />
+                              <span
+                                className='text-xs whitespace-nowrap'
+                                style={{ color: 'var(--color-text)' }}
+                              >
+                                Removible
+                              </span>
+                            </label>
+                            <button
+                              type='button'
+                              onClick={() => removeMateriaPrimaItem(index)}
+                              className='px-3 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+
+                          {/* Variable quantity toggle */}
+                          <div className='mt-2 flex items-center gap-2'>
+                            <input
+                              type='checkbox'
+                              id={`variable_${index}`}
+                              checked={item.is_variable}
+                              onChange={(e) =>
+                                updateMateriaPrimaItem(
+                                  index,
+                                  'is_variable',
                                   e.target.checked
                                 )
                               }
                               className='w-4 h-4'
                             />
-                            <span
-                              className='text-xs whitespace-nowrap'
+                            <label
+                              htmlFor={`variable_${index}`}
+                              className='text-sm font-medium'
                               style={{ color: 'var(--color-text)' }}
                             >
-                              Removible
-                            </span>
-                          </label>
-                          <button
-                            type='button'
-                            onClick={() => removeMateriaPrimaItem(index)}
-                            className='px-3 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600'
-                          >
-                            <X size={18} />
-                          </button>
+                              Cantidad Variable (cliente elige al comprar)
+                            </label>
+                          </div>
+
+                          {/* Variable quantity options */}
+                          {item.is_variable && (
+                            <div className='mt-3 grid grid-cols-2 md:grid-cols-4 gap-2'>
+                              <div>
+                                <label
+                                  className='block text-xs opacity-70 mb-1'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  Mínimo
+                                </label>
+                                <input
+                                  type='number'
+                                  step='1'
+                                  min='0'
+                                  required
+                                  value={item.min_quantity}
+                                  onChange={(e) =>
+                                    updateMateriaPrimaItem(
+                                      index,
+                                      'min_quantity',
+                                      e.target.value
+                                    )
+                                  }
+                                  className='w-full px-2 py-1 border rounded-lg text-sm'
+                                  style={{
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-text)',
+                                    borderColor: 'var(--color-text)',
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  className='block text-xs opacity-70 mb-1'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  Máximo
+                                </label>
+                                <input
+                                  type='number'
+                                  step='1'
+                                  min='1'
+                                  required
+                                  value={item.max_quantity}
+                                  onChange={(e) =>
+                                    updateMateriaPrimaItem(
+                                      index,
+                                      'max_quantity',
+                                      e.target.value
+                                    )
+                                  }
+                                  className='w-full px-2 py-1 border rounded-lg text-sm'
+                                  style={{
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-text)',
+                                    borderColor: 'var(--color-text)',
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  className='block text-xs opacity-70 mb-1'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  Por defecto
+                                </label>
+                                <input
+                                  type='number'
+                                  step='1'
+                                  min='0'
+                                  required
+                                  value={item.default_quantity}
+                                  onChange={(e) =>
+                                    updateMateriaPrimaItem(
+                                      index,
+                                      'default_quantity',
+                                      e.target.value
+                                    )
+                                  }
+                                  className='w-full px-2 py-1 border rounded-lg text-sm'
+                                  style={{
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-text)',
+                                    borderColor: 'var(--color-text)',
+                                  }}
+                                />
+                              </div>
+                              <div>
+                                <label
+                                  className='block text-xs opacity-70 mb-1'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  Precio/unidad ($)
+                                </label>
+                                <input
+                                  type='number'
+                                  step='0.01'
+                                  min='0'
+                                  required
+                                  value={item.price_per_unit}
+                                  onChange={(e) =>
+                                    updateMateriaPrimaItem(
+                                      index,
+                                      'price_per_unit',
+                                      e.target.value
+                                    )
+                                  }
+                                  className='w-full px-2 py-1 border rounded-lg text-sm'
+                                  style={{
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-text)',
+                                    borderColor: 'var(--color-text)',
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

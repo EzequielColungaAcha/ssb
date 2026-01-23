@@ -1,5 +1,5 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 export interface MateriaPrima {
   id: string;
@@ -18,6 +18,12 @@ export interface ProductMateriaPrima {
   quantity: number;
   removable: boolean;
   created_at: string;
+  // Variable quantity ingredient fields
+  is_variable?: boolean; // If true, quantity is chosen at sale time
+  min_quantity?: number; // Minimum allowed (e.g., 1)
+  max_quantity?: number; // Maximum allowed (e.g., 5)
+  price_per_unit?: number; // Price added per unit (e.g., $500 per bacon strip)
+  default_quantity?: number; // Default quantity shown (e.g., 1)
 }
 
 export interface Product {
@@ -54,6 +60,13 @@ export interface Sale {
   created_at: string;
 }
 
+export interface VariableIngredient {
+  materia_prima_id: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+}
+
 export interface SaleItem {
   id: string;
   sale_id: string;
@@ -64,6 +77,7 @@ export interface SaleItem {
   quantity: number;
   subtotal: number;
   removed_ingredients?: string[];
+  variable_ingredients?: VariableIngredient[]; // Track variable ingredient quantities
   combo_name?: string;
   combo_instance_id?: string; // Unique ID for each combo instance in a sale
   combo_slot_index?: number; // Order of product within combo (for proper display ordering)

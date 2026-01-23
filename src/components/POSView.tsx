@@ -63,10 +63,18 @@ import { useCombo, ComboSelection } from '../hooks/useCombo';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatPrice, formatNumber } from '../lib/utils';
 
+interface VariableIngredientSelection {
+  materia_prima_id: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+}
+
 interface CartItem extends Product {
   quantity: number;
   cartItemId: string; // unique per cart entry (allows same product with different mods)
   removedIngredients: string[]; // materia prima names removed
+  variableIngredients?: VariableIngredientSelection[]; // variable quantity ingredients
   // Combo-specific fields
   isCombo?: boolean;
   comboId?: string;
@@ -100,6 +108,13 @@ interface IngredientInfo {
   id: string;
   name: string;
   removed: boolean;
+  // Variable quantity fields
+  is_variable?: boolean;
+  min_quantity?: number;
+  max_quantity?: number;
+  default_quantity?: number;
+  price_per_unit?: number;
+  selected_quantity?: number;
 }
 
 const BILLS = [10, 20, 50, 100, 200, 500, 1000, 2000, 10000, 20000];
@@ -675,15 +690,25 @@ export function POSView() {
 
   const addToCart = async (
     product: Product,
-    removedIngredients: string[] = []
+    removedIngredients: string[] = [],
+    variableIngredients?: VariableIngredientSelection[]
   ) => {
     const removedKey = removedIngredients.sort().join(',');
-    // Find existing item with same product AND same removed ingredients
-    const existing = cart.find(
-      (item) =>
-        item.id === product.id &&
-        item.removedIngredients.sort().join(',') === removedKey
-    );
+    const variableKey = variableIngredients
+      ? variableIngredients.map((v) => `${v.materia_prima_id}:${v.quantity}`).join(',')
+      : '';
+    const fullKey = `${removedKey}|${variableKey}`;
+
+    // Find existing item with same product AND same customizations
+    const existing = cart.find((item) => {
+      const itemRemovedKey = item.removedIngredients.sort().join(',');
+      const itemVariableKey = item.variableIngredients
+        ? item.variableIngredients.map((v) => `${v.materia_prima_id}:${v.quantity}`).join(',')
+        : '';
+      const itemFullKey = `${itemRemovedKey}|${itemVariableKey}`;
+      return item.id === product.id && itemFullKey === fullKey;
+    });
+
     const newQuantity = existing ? existing.quantity + 1 : 1;
     const availableStock = getProductStock(product);
 
@@ -700,12 +725,24 @@ export function POSView() {
       }
     }
 
+    // Calculate additional price from variable ingredients
+    const variablePrice = variableIngredients
+      ? variableIngredients.reduce(
+          (sum, v) => sum + v.quantity * v.unit_price,
+          0
+        )
+      : 0;
+
     setCart((prevCart) => {
-      const prevExisting = prevCart.find(
-        (item) =>
-          item.id === product.id &&
-          item.removedIngredients.sort().join(',') === removedKey
-      );
+      const prevExisting = prevCart.find((item) => {
+        const itemRemovedKey = item.removedIngredients.sort().join(',');
+        const itemVariableKey = item.variableIngredients
+          ? item.variableIngredients.map((v) => `${v.materia_prima_id}:${v.quantity}`).join(',')
+          : '';
+        const itemFullKey = `${itemRemovedKey}|${itemVariableKey}`;
+        return item.id === product.id && itemFullKey === fullKey;
+      });
+
       if (prevExisting) {
         return prevCart.map((item) =>
           item.cartItemId === prevExisting.cartItemId
@@ -717,9 +754,11 @@ export function POSView() {
         ...prevCart,
         {
           ...product,
+          price: product.price + variablePrice, // Add variable ingredient price
           quantity: 1,
           cartItemId: crypto.randomUUID(),
           removedIngredients,
+          variableIngredients,
         },
       ];
     });
@@ -744,22 +783,30 @@ export function POSView() {
       return;
     }
 
-    // Filter only removable ingredients
-    const removableMPs = productMPs.filter((pmp) => pmp.removable === true);
+    // Filter removable or variable ingredients
+    const customizableMPs = productMPs.filter(
+      (pmp) => pmp.removable === true || pmp.is_variable === true
+    );
 
-    if (removableMPs.length === 0) {
-      // No removable ingredients, just add to cart
+    if (customizableMPs.length === 0) {
+      // No customizable ingredients, just add to cart
       addToCart(product);
       return;
     }
 
-    // Build ingredient list with names (only removable ones)
-    const ingredients: IngredientInfo[] = removableMPs.map((pmp) => {
+    // Build ingredient list with names
+    const ingredients: IngredientInfo[] = customizableMPs.map((pmp) => {
       const mp = materiaPrima.find((m) => m.id === pmp.materia_prima_id);
       return {
         id: pmp.materia_prima_id,
         name: mp?.name || 'Desconocido',
         removed: false,
+        is_variable: pmp.is_variable,
+        min_quantity: pmp.min_quantity,
+        max_quantity: pmp.max_quantity,
+        default_quantity: pmp.default_quantity,
+        price_per_unit: pmp.price_per_unit,
+        selected_quantity: pmp.default_quantity ?? 1,
       };
     });
 
@@ -777,15 +824,46 @@ export function POSView() {
     );
   };
 
+  // Update variable ingredient quantity
+  const updateVariableIngredientQuantity = (
+    ingredientId: string,
+    delta: number
+  ) => {
+    setIngredientsList((prev) =>
+      prev.map((ing) => {
+        if (ing.id !== ingredientId || !ing.is_variable) return ing;
+        const newQty = Math.max(
+          ing.min_quantity ?? 0,
+          Math.min(ing.max_quantity ?? 99, (ing.selected_quantity ?? 1) + delta)
+        );
+        return { ...ing, selected_quantity: newQty };
+      })
+    );
+  };
+
   // Confirm customization and add to cart
   const confirmCustomization = () => {
     if (!customizingProduct) return;
 
     const removedIngredients = ingredientsList
-      .filter((ing) => ing.removed)
+      .filter((ing) => ing.removed && !ing.is_variable)
       .map((ing) => ing.name);
 
-    addToCart(customizingProduct, removedIngredients);
+    // Collect variable ingredients
+    const variableIngredients: VariableIngredientSelection[] = ingredientsList
+      .filter((ing) => ing.is_variable && (ing.selected_quantity ?? 0) > 0)
+      .map((ing) => ({
+        materia_prima_id: ing.id,
+        name: ing.name,
+        quantity: ing.selected_quantity ?? ing.default_quantity ?? 1,
+        unit_price: ing.price_per_unit ?? 0,
+      }));
+
+    addToCart(
+      customizingProduct,
+      removedIngredients,
+      variableIngredients.length > 0 ? variableIngredients : undefined
+    );
 
     // Reset modal state
     setShowIngredientModal(false);
@@ -1885,7 +1963,8 @@ export function POSView() {
       const aggregateMateriaPrimaForProduct = async (
         productId: string,
         quantity: number,
-        removedIngredients?: string[]
+        removedIngredients?: string[],
+        variableIngredients?: VariableIngredientSelection[]
       ) => {
         const links = await getProductMateriaPrima(productId);
         for (const link of links) {
@@ -1896,6 +1975,23 @@ export function POSView() {
               continue;
             }
           }
+
+          // Handle variable quantity ingredients
+          if (link.is_variable) {
+            const varIng = variableIngredients?.find(
+              (v) => v.materia_prima_id === link.materia_prima_id
+            );
+            if (varIng) {
+              const current =
+                materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+              materiaPrimaDeductions.set(
+                link.materia_prima_id,
+                current + varIng.quantity * quantity
+              );
+            }
+            continue;
+          }
+
           const current =
             materiaPrimaDeductions.get(link.materia_prima_id) || 0;
           materiaPrimaDeductions.set(
@@ -1913,7 +2009,8 @@ export function POSView() {
           await aggregateMateriaPrimaForProduct(
             item.id,
             item.quantity,
-            item.removedIngredients
+            item.removedIngredients,
+            item.variableIngredients
           );
         } else {
           const current = productStockDeductions.get(item.id) || 0;
@@ -1935,7 +2032,8 @@ export function POSView() {
             await aggregateMateriaPrimaForProduct(
               selection.productId,
               comboItem.quantity,
-              selection.removedIngredients || []
+              selection.removedIngredients || [],
+              selection.variableIngredients
             );
           } else {
             const current =
@@ -2128,7 +2226,8 @@ export function POSView() {
       const aggregateMateriaPrimaForProduct = async (
         productId: string,
         quantity: number,
-        removedIngredients?: string[]
+        removedIngredients?: string[],
+        variableIngredients?: VariableIngredientSelection[]
       ) => {
         const links = await getProductMateriaPrima(productId);
         for (const link of links) {
@@ -2139,6 +2238,23 @@ export function POSView() {
               continue;
             }
           }
+
+          // Handle variable quantity ingredients
+          if (link.is_variable) {
+            const varIng = variableIngredients?.find(
+              (v) => v.materia_prima_id === link.materia_prima_id
+            );
+            if (varIng) {
+              const current =
+                materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+              materiaPrimaDeductions.set(
+                link.materia_prima_id,
+                current + varIng.quantity * quantity
+              );
+            }
+            continue;
+          }
+
           const current =
             materiaPrimaDeductions.get(link.materia_prima_id) || 0;
           materiaPrimaDeductions.set(
@@ -2156,7 +2272,8 @@ export function POSView() {
           await aggregateMateriaPrimaForProduct(
             item.id,
             item.quantity,
-            item.removedIngredients
+            item.removedIngredients,
+            item.variableIngredients
           );
         } else {
           const current = productStockDeductions.get(item.id) || 0;
@@ -2178,7 +2295,8 @@ export function POSView() {
             await aggregateMateriaPrimaForProduct(
               selection.productId,
               comboItem.quantity,
-              selection.removedIngredients || []
+              selection.removedIngredients || [],
+              selection.variableIngredients
             );
           } else {
             const current =
@@ -4760,12 +4878,31 @@ export function POSView() {
               className='px-6 py-4 flex items-center justify-between border-b'
               style={{ borderColor: 'var(--color-background-accent)' }}
             >
-              <h2
-                className='text-xl font-bold'
-                style={{ color: 'var(--color-text)' }}
-              >
-                {customizingProduct.name}
-              </h2>
+              <div>
+                <h2
+                  className='text-xl font-bold'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {customizingProduct.name}
+                </h2>
+                <p
+                  className='text-lg font-bold'
+                  style={{ color: 'var(--color-accent)' }}
+                >
+                  {formatPrice(
+                    customizingProduct.price +
+                      ingredientsList
+                        .filter((ing) => ing.is_variable)
+                        .reduce(
+                          (sum, ing) =>
+                            sum +
+                            (ing.selected_quantity ?? 0) *
+                              (ing.price_per_unit ?? 0),
+                          0
+                        )
+                  )}
+                </p>
+              </div>
               <button
                 onClick={cancelCustomization}
                 className='flex justify-center items-center p-1 rounded-lg hover:opacity-80 transition-opacity'
@@ -4776,37 +4913,131 @@ export function POSView() {
             </div>
 
             <div className='p-6'>
-              <p
-                className='text-sm mb-4 opacity-70'
-                style={{ color: 'var(--color-text)' }}
-              >
-                Selecciona los ingredientes a quitar:
-              </p>
-
-              <div className='space-y-3 mb-6'>
-                {ingredientsList.map((ingredient) => (
-                  <button
-                    key={ingredient.id}
-                    onClick={() => toggleIngredient(ingredient.id)}
-                    className='w-full flex items-center justify-between p-3 rounded-lg transition-all'
-                    style={{
-                      backgroundColor: ingredient.removed
-                        ? 'var(--color-primary)'
-                        : 'var(--color-background)',
-                      color: ingredient.removed
-                        ? 'var(--color-on-primary)'
-                        : 'var(--color-text)',
-                    }}
+              {/* Removable ingredients section */}
+              {ingredientsList.filter((ing) => !ing.is_variable).length > 0 && (
+                <>
+                  <p
+                    className='text-sm mb-4 opacity-70'
+                    style={{ color: 'var(--color-text)' }}
                   >
-                    <span className={ingredient.removed ? 'line-through' : ''}>
-                      {ingredient.name}
-                    </span>
-                    {ingredient.removed && (
-                      <span className='text-sm font-semibold'>SIN</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+                    Selecciona los ingredientes a quitar:
+                  </p>
+
+                  <div className='space-y-3 mb-6'>
+                    {ingredientsList
+                      .filter((ing) => !ing.is_variable)
+                      .map((ingredient) => (
+                        <button
+                          key={ingredient.id}
+                          onClick={() => toggleIngredient(ingredient.id)}
+                          className='w-full flex items-center justify-between p-3 rounded-lg transition-all'
+                          style={{
+                            backgroundColor: ingredient.removed
+                              ? 'var(--color-primary)'
+                              : 'var(--color-background)',
+                            color: ingredient.removed
+                              ? 'var(--color-on-primary)'
+                              : 'var(--color-text)',
+                          }}
+                        >
+                          <span
+                            className={ingredient.removed ? 'line-through' : ''}
+                          >
+                            {ingredient.name}
+                          </span>
+                          {ingredient.removed && (
+                            <span className='text-sm font-semibold'>SIN</span>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                </>
+              )}
+
+              {/* Variable quantity ingredients section */}
+              {ingredientsList.filter((ing) => ing.is_variable).length > 0 && (
+                <>
+                  <p
+                    className='text-sm mb-4 opacity-70'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Cantidad de extras:
+                  </p>
+
+                  <div className='space-y-3 mb-6'>
+                    {ingredientsList
+                      .filter((ing) => ing.is_variable)
+                      .map((ingredient) => (
+                        <div
+                          key={ingredient.id}
+                          className='flex items-center justify-between p-3 rounded-lg'
+                          style={{
+                            backgroundColor: 'var(--color-background)',
+                          }}
+                        >
+                          <div>
+                            <span style={{ color: 'var(--color-text)' }}>
+                              {ingredient.name}
+                            </span>
+                            <span
+                              className='ml-2 text-sm opacity-70'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              (+{formatPrice(ingredient.price_per_unit ?? 0)}
+                              /u)
+                            </span>
+                          </div>
+                          <div className='flex items-center gap-2'>
+                            <button
+                              onClick={() =>
+                                updateVariableIngredientQuantity(
+                                  ingredient.id,
+                                  -1
+                                )
+                              }
+                              disabled={
+                                (ingredient.selected_quantity ?? 0) <=
+                                (ingredient.min_quantity ?? 0)
+                              }
+                              className='w-8 h-8 flex items-center justify-center rounded-lg font-bold transition-opacity disabled:opacity-30'
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                color: 'var(--color-on-primary)',
+                              }}
+                            >
+                              -
+                            </button>
+                            <span
+                              className='w-8 text-center font-bold'
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {ingredient.selected_quantity ?? 0}
+                            </span>
+                            <button
+                              onClick={() =>
+                                updateVariableIngredientQuantity(
+                                  ingredient.id,
+                                  1
+                                )
+                              }
+                              disabled={
+                                (ingredient.selected_quantity ?? 0) >=
+                                (ingredient.max_quantity ?? 99)
+                              }
+                              className='w-8 h-8 flex items-center justify-center rounded-lg font-bold transition-opacity disabled:opacity-30'
+                              style={{
+                                backgroundColor: 'var(--color-primary)',
+                                color: 'var(--color-on-primary)',
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </>
+              )}
 
               <div className='flex gap-3'>
                 <button

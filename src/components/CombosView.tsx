@@ -236,21 +236,42 @@ export function CombosView() {
                     const product = products.find((p) => p.id === productId);
                     if (!product) return null;
 
-                    let ingredients: Array<{ id: string; name: string }> = [];
+                    let ingredients: Array<{
+                      id: string;
+                      name: string;
+                      is_variable?: boolean;
+                      min_quantity?: number;
+                      max_quantity?: number;
+                      default_quantity?: number;
+                      price_per_unit?: number;
+                    }> = [];
                     if (product.uses_materia_prima) {
                       const productIngredients = await getProductMateriaPrima(
                         productId
                       );
                       ingredients = productIngredients
-                        .filter((i) => i.removable)
+                        .filter((i) => i.removable || i.is_variable)
                         .map((i) => {
                           const mp = materiaPrima.find(
                             (m) => m.id === i.materia_prima_id
                           );
-                          return {
+                          const base = {
                             id: i.materia_prima_id,
                             name: mp?.name || 'Desconocido',
                           };
+
+                          if (i.is_variable) {
+                            return {
+                              ...base,
+                              is_variable: true,
+                              min_quantity: i.min_quantity ?? 1,
+                              max_quantity: i.max_quantity ?? 5,
+                              default_quantity: i.default_quantity ?? 1,
+                              price_per_unit: i.price_per_unit ?? 0,
+                            };
+                          }
+
+                          return base;
                         });
                     }
 
