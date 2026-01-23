@@ -1,6 +1,7 @@
 {
   "name": "SSB",
   "short_name": "SSB",
+  "version": "1.1.0",
   "description": "Offline-capable Point of Sale Application",
   "start_url": ".",
   "scope": ".",
