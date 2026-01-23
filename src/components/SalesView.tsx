@@ -65,16 +65,16 @@ export function SalesView() {
       // Date from filter
       if (dateFrom) {
         const saleDate = new Date(sale.completed_at);
-        const fromDate = new Date(dateFrom);
-        fromDate.setHours(0, 0, 0, 0);
+        const [year, month, day] = dateFrom.split('-').map(Number);
+        const fromDate = new Date(year, month - 1, day, 0, 0, 0, 0);
         if (saleDate < fromDate) return false;
       }
 
       // Date to filter
       if (dateTo) {
         const saleDate = new Date(sale.completed_at);
-        const toDate = new Date(dateTo);
-        toDate.setHours(23, 59, 59, 999);
+        const [year, month, day] = dateTo.split('-').map(Number);
+        const toDate = new Date(year, month - 1, day, 23, 59, 59, 999);
         if (saleDate > toDate) return false;
       }
 
@@ -481,7 +481,7 @@ export function SalesView() {
                 {hasActiveFilters ? 'No hay ventas que coincidan con los filtros' : 'Aún no hay ventas'}
               </div>
             ) : (
-              filteredSales.map((sale, index) => (
+              filteredSales.map((sale) => (
                 <div
                   key={sale.id}
                   onClick={() => setSelectedSale(sale)}
@@ -514,7 +514,9 @@ export function SalesView() {
                               : 'var(--color-text)',
                         }}
                       >
-                        #{filteredSales.length - index}
+                        #{parseInt(
+                            sale.sale_number.replace(/^S-/, '')
+                          ).toLocaleString('es-AR')}
                       </div>
                       {sale.payment_method === 'unpaid' && (
                         <span

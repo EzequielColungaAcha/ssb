@@ -421,8 +421,9 @@ export function POSView() {
     checkStockAvailability,
     calculateAvailableStock,
     refresh: refreshMateriaPrima,
-    getProductMateriaPrima,
+    getProductMateriaPrimaCached,
     materiaPrima,
+    productMPCache,
   } = useMateriaPrima();
   const {
     combos,
@@ -664,32 +665,33 @@ export function POSView() {
     setProductStocks(Object.fromEntries(entries));
   }, [products, calculateAvailableStock]);
 
-  // Calculate minimum prices for products with variable ingredients
-  const loadMinimumPrices = useCallback(async () => {
-    const materiaPrimaProducts = products.filter((p) => p.uses_materia_prima);
-
-    if (materiaPrimaProducts.length === 0) {
+  // Calculate minimum prices for products with variable ingredients (using cache - sync)
+  useEffect(() => {
+    if (!products.length || productMPCache.size === 0) {
       setProductMinPrices({});
       return;
     }
 
-    const entries = await Promise.all(
-      materiaPrimaProducts.map(async (product) => {
-        const links = await getProductMateriaPrima(product.id);
-        let additionalPrice = 0;
+    const minPrices: Record<string, number> = {};
+    for (const product of products) {
+      if (!product.uses_materia_prima) continue;
 
-        for (const link of links) {
-          if (link.is_variable && link.min_quantity && link.price_per_unit) {
-            additionalPrice += link.min_quantity * link.price_per_unit;
-          }
+      const links = getProductMateriaPrimaCached(product.id);
+      let additionalPrice = 0;
+
+      for (const link of links) {
+        if (link.is_variable && link.min_quantity && link.price_per_unit) {
+          additionalPrice += link.min_quantity * link.price_per_unit;
         }
+      }
 
-        return [product.id, product.price + additionalPrice] as const;
-      })
-    );
+      if (additionalPrice > 0) {
+        minPrices[product.id] = product.price + additionalPrice;
+      }
+    }
 
-    setProductMinPrices(Object.fromEntries(entries));
-  }, [products, getProductMateriaPrima]);
+    setProductMinPrices(minPrices);
+  }, [products, productMPCache, getProductMateriaPrimaCached]);
 
   // Get display price including minimum variable ingredient costs
   const getDisplayPrice = (product: Product) => {
@@ -806,16 +808,16 @@ export function POSView() {
     toast.success(`${product.name} agregado`);
   };
 
-  // Handle long-press to open ingredient customization modal
-  const handleProductLongPress = async (product: Product) => {
+  // Handle long-press to open ingredient customization modal (using cache - sync)
+  const handleProductLongPress = (product: Product) => {
     if (!product.uses_materia_prima) {
       // If product doesn't use materia prima, just add to cart
       addToCart(product);
       return;
     }
 
-    // Fetch product's materia prima
-    const productMPs = await getProductMateriaPrima(product.id);
+    // Get product's materia prima from cache
+    const productMPs = getProductMateriaPrimaCached(product.id);
 
     if (productMPs.length === 0) {
       // No ingredients to customize, just add to cart
@@ -2005,14 +2007,14 @@ export function POSView() {
       const productStockDeductions = new Map<string, number>();
       const materiaPrimaDeductions = new Map<string, number>();
 
-      // Helper to aggregate materia prima deductions for a product
-      const aggregateMateriaPrimaForProduct = async (
+      // Helper to aggregate materia prima deductions for a product (using cache - sync)
+      const aggregateMateriaPrimaForProduct = (
         productId: string,
         quantity: number,
         removedIngredients?: string[],
         variableIngredients?: VariableIngredientSelection[]
       ) => {
-        const links = await getProductMateriaPrima(productId);
+        const links = getProductMateriaPrimaCached(productId);
 
         // First pass: collect variable ingredient quantities for linked calculations
         const variableQuantities = new Map<string, number>();
@@ -2084,7 +2086,7 @@ export function POSView() {
         if (item.isCombo) continue;
 
         if (item.uses_materia_prima) {
-          await aggregateMateriaPrimaForProduct(
+          aggregateMateriaPrimaForProduct(
             item.id,
             item.quantity,
             item.removedIngredients,
@@ -2107,7 +2109,7 @@ export function POSView() {
           if (!product) continue;
 
           if (product.uses_materia_prima) {
-            await aggregateMateriaPrimaForProduct(
+            aggregateMateriaPrimaForProduct(
               selection.productId,
               comboItem.quantity,
               selection.removedIngredients || [],
@@ -2301,14 +2303,14 @@ export function POSView() {
       const productStockDeductions = new Map<string, number>();
       const materiaPrimaDeductions = new Map<string, number>();
 
-      // Helper to aggregate materia prima deductions for a product
-      const aggregateMateriaPrimaForProduct = async (
+      // Helper to aggregate materia prima deductions for a product (using cache - sync)
+      const aggregateMateriaPrimaForProduct = (
         productId: string,
         quantity: number,
         removedIngredients?: string[],
         variableIngredients?: VariableIngredientSelection[]
       ) => {
-        const links = await getProductMateriaPrima(productId);
+        const links = getProductMateriaPrimaCached(productId);
 
         // First pass: collect variable ingredient quantities for linked calculations
         const variableQuantities = new Map<string, number>();
@@ -2380,7 +2382,7 @@ export function POSView() {
         if (item.isCombo) continue;
 
         if (item.uses_materia_prima) {
-          await aggregateMateriaPrimaForProduct(
+          aggregateMateriaPrimaForProduct(
             item.id,
             item.quantity,
             item.removedIngredients,
@@ -2403,7 +2405,7 @@ export function POSView() {
           if (!product) continue;
 
           if (product.uses_materia_prima) {
-            await aggregateMateriaPrimaForProduct(
+            aggregateMateriaPrimaForProduct(
               selection.productId,
               comboItem.quantity,
               selection.removedIngredients || [],
@@ -2811,10 +2813,6 @@ export function POSView() {
   }, [loadStocks]);
 
   useEffect(() => {
-    loadMinimumPrices();
-  }, [loadMinimumPrices]);
-
-  useEffect(() => {
     loadSettings();
     loadNextSaleNumber();
     // we no longer use global events for lock/save
@@ -2840,42 +2838,39 @@ export function POSView() {
     setSortedCombos(sorted);
   }, [combos]);
 
-  // Load products with removable ingredients
+  // Load products with removable ingredients (using cache - sync)
   useEffect(() => {
-    const loadRemovableIngredients = async () => {
-      const productsWithRemovable = new Set<string>();
-      const removableByName: Record<string, string[]> = {};
+    if (productMPCache.size === 0) return;
 
-      for (const product of products) {
-        if (product.uses_materia_prima) {
-          const productMPs = await getProductMateriaPrima(product.id);
-          const removableIngredients: string[] = [];
+    const productsWithRemovable = new Set<string>();
+    const removableByName: Record<string, string[]> = {};
 
-          for (const mp of productMPs) {
-            if (mp.removable) {
-              const mpData = materiaPrima.find(
-                (m) => m.id === mp.materia_prima_id
-              );
-              if (mpData) {
-                removableIngredients.push(mpData.name);
-              }
+    for (const product of products) {
+      if (product.uses_materia_prima) {
+        const productMPs = getProductMateriaPrimaCached(product.id);
+        const removableIngredients: string[] = [];
+
+        for (const mp of productMPs) {
+          if (mp.removable) {
+            const mpData = materiaPrima.find(
+              (m) => m.id === mp.materia_prima_id
+            );
+            if (mpData) {
+              removableIngredients.push(mpData.name);
             }
           }
+        }
 
-          if (removableIngredients.length > 0) {
-            productsWithRemovable.add(product.id);
-            removableByName[product.name] = removableIngredients;
-          }
+        if (removableIngredients.length > 0) {
+          productsWithRemovable.add(product.id);
+          removableByName[product.name] = removableIngredients;
         }
       }
+    }
 
-      setProductsWithRemovableIngredients(productsWithRemovable);
-      setProductRemovableIngredients(removableByName);
-    };
-
-    loadRemovableIngredients();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products, materiaPrima]);
+    setProductsWithRemovableIngredients(productsWithRemovable);
+    setProductRemovableIngredients(removableByName);
+  }, [products, materiaPrima, productMPCache, getProductMateriaPrimaCached]);
 
   // Calculate combo stock availability
   useEffect(() => {

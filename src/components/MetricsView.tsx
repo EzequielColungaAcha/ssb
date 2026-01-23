@@ -11,7 +11,6 @@ import {
 import { useSales } from '../hooks/useSales';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
-import { useCombo } from '../hooks/useCombo';
 import { db, SaleItem, ProductMateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
@@ -27,13 +26,7 @@ export function MetricsView() {
   const { sales } = useSales();
   const { products } = useProducts();
   const { materiaPrima, calculateAvailableStock } = useMateriaPrima();
-  const { combos } = useCombo();
 
-  // Create a Set of combo names for efficient lookup (memoized to prevent re-renders)
-  const comboNames = React.useMemo(
-    () => new Set(combos.map((c) => c.name)),
-    [combos]
-  );
   const [topProducts, setTopProducts] = useState<ProductSales[]>([]);
   const [allSoldProducts, setAllSoldProducts] = useState<ProductSales[]>([]);
   const [mostProfitableProducts, setMostProfitableProducts] = useState<
@@ -119,6 +112,7 @@ export function MetricsView() {
             break;
           case 'thisMonth':
             filterStartDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            filterStartDate.setHours(0, 0, 0, 0);
             filterEndDate = new Date(now);
             filterEndDate.setHours(23, 59, 59, 999);
             break;
@@ -128,6 +122,7 @@ export function MetricsView() {
               now.getMonth() - 1,
               1
             );
+            filterStartDate.setHours(0, 0, 0, 0);
             filterEndDate = new Date(now.getFullYear(), now.getMonth(), 0);
             filterEndDate.setHours(23, 59, 59, 999);
             break;
@@ -299,7 +294,6 @@ export function MetricsView() {
     productFilter,
     products,
     sales,
-    comboNames,
   ]);
   const filteredProducts =
     categoryFilter === 'all'

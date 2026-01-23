@@ -9,9 +9,14 @@ import {
 export function useMateriaPrima() {
   const [materiaPrima, setMateriaPrima] = useState<MateriaPrima[]>([]);
   const [loading, setLoading] = useState(true);
+  // Cache for product materia prima links - keyed by product_id
+  const [productMPCache, setProductMPCache] = useState<
+    Map<string, ProductMateriaPrima[]>
+  >(new Map());
 
   useEffect(() => {
     loadMateriaPrima();
+    loadProductMateriaPrimaCache();
   }, []);
 
   const loadMateriaPrima = async () => {
@@ -31,6 +36,31 @@ export function useMateriaPrima() {
       setMateriaPrima([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Load all product materia prima links into cache
+  const loadProductMateriaPrimaCache = async () => {
+    try {
+      await db.init();
+      if (!db.hasStore('product_materia_prima')) {
+        setProductMPCache(new Map());
+        return;
+      }
+      const allLinks = await db.getAll<ProductMateriaPrima>(
+        'product_materia_prima'
+      );
+      // Group by product_id
+      const cache = new Map<string, ProductMateriaPrima[]>();
+      for (const link of allLinks) {
+        const existing = cache.get(link.product_id) || [];
+        existing.push(link);
+        cache.set(link.product_id, existing);
+      }
+      setProductMPCache(cache);
+    } catch (error) {
+      console.error('Error loading product materia prima cache:', error);
+      setProductMPCache(new Map());
     }
   };
 
@@ -140,6 +170,14 @@ export function useMateriaPrima() {
     }
   };
 
+  // Sync version that uses cache - much faster for bulk operations
+  const getProductMateriaPrimaCached = useCallback(
+    (productId: string): ProductMateriaPrima[] => {
+      return productMPCache.get(productId) || [];
+    },
+    [productMPCache]
+  );
+
   const setProductMateriaPrima = async (
     productId: string,
     items: Array<{
@@ -168,6 +206,7 @@ export function useMateriaPrima() {
         await db.delete('product_materia_prima', item.id);
       }
 
+      const newLinks: ProductMateriaPrima[] = [];
       for (const item of items) {
         const newLink: ProductMateriaPrima = {
           id: crypto.randomUUID(),
@@ -185,7 +224,15 @@ export function useMateriaPrima() {
           linked_multiplier: item.linked_multiplier,
         };
         await db.add('product_materia_prima', newLink);
+        newLinks.push(newLink);
       }
+
+      // Update cache for this product
+      setProductMPCache((prev) => {
+        const newCache = new Map(prev);
+        newCache.set(productId, newLinks);
+        return newCache;
+      });
     } catch (error) {
       console.error('Error setting product materia prima:', error);
       throw error;
@@ -204,7 +251,13 @@ export function useMateriaPrima() {
       const links = await getProductMateriaPrima(productId);
 
       let totalCost = 0;
+
+      // First pass: Process regular and variable ingredients, build map of variable quantities
+      const variableDefaultQuantities = new Map<string, number>();
       for (const link of links) {
+        // Skip linked ingredients in first pass
+        if (link.linked_to) continue;
+
         const mp = await db.get<MateriaPrima>(
           'materia_prima',
           link.materia_prima_id
@@ -215,6 +268,33 @@ export function useMateriaPrima() {
             ? (link.default_quantity ?? 1)
             : link.quantity;
           totalCost += mp.cost_per_unit * qty;
+
+          // Store variable ingredient default quantities for linked ingredients
+          if (link.is_variable) {
+            variableDefaultQuantities.set(
+              link.materia_prima_id,
+              link.default_quantity ?? 1
+            );
+          }
+        }
+      }
+
+      // Second pass: Process linked ingredients
+      for (const link of links) {
+        if (!link.linked_to || !link.linked_multiplier) continue;
+
+        const parentQty = variableDefaultQuantities.get(link.linked_to);
+        if (parentQty === undefined) continue;
+
+        const mp = await db.get<MateriaPrima>(
+          'materia_prima',
+          link.materia_prima_id
+        );
+        if (mp) {
+          // linkedQty = (parentDefaultQty * multiplier) + offset
+          const linkedQty =
+            parentQty * link.linked_multiplier + (link.quantity || 0);
+          totalCost += mp.cost_per_unit * linkedQty;
         }
       }
 
@@ -329,7 +409,12 @@ export function useMateriaPrima() {
 
         let minStock = Infinity;
 
+        // First pass: Process regular and variable ingredients, build map of variable min quantities
+        const variableMinQuantities = new Map<string, number>();
         for (const link of links) {
+          // Skip linked ingredients in first pass
+          if (link.linked_to) continue;
+
           const mp = await db.get<MateriaPrima>(
             'materia_prima',
             link.materia_prima_id
@@ -344,6 +429,35 @@ export function useMateriaPrima() {
             : link.quantity;
           const possibleUnits = Math.floor(mp.stock / qty);
           minStock = Math.min(minStock, possibleUnits);
+
+          // Store variable ingredient min quantities for linked ingredients
+          if (link.is_variable) {
+            variableMinQuantities.set(link.materia_prima_id, link.min_quantity ?? 1);
+          }
+        }
+
+        // Second pass: Process linked ingredients
+        for (const link of links) {
+          if (!link.linked_to || !link.linked_multiplier) continue;
+
+          const parentMinQty = variableMinQuantities.get(link.linked_to);
+          if (parentMinQty === undefined) continue;
+
+          const mp = await db.get<MateriaPrima>(
+            'materia_prima',
+            link.materia_prima_id
+          );
+          if (!mp) {
+            return 0;
+          }
+
+          // linkedQty = (parentMinQty * multiplier) + offset
+          const linkedQty =
+            parentMinQty * link.linked_multiplier + (link.quantity || 0);
+          if (linkedQty > 0) {
+            const possibleUnits = Math.floor(mp.stock / linkedQty);
+            minStock = Math.min(minStock, possibleUnits);
+          }
         }
 
         return minStock === Infinity ? 0 : minStock;
@@ -363,11 +477,14 @@ export function useMateriaPrima() {
     deleteMateriaPrima,
     updateStock,
     getProductMateriaPrima,
+    getProductMateriaPrimaCached,
     setProductMateriaPrima,
     calculateProductCost,
     checkStockAvailability,
     deductMateriaPrimaStock,
     calculateAvailableStock,
     refresh: loadMateriaPrima,
+    refreshCache: loadProductMateriaPrimaCache,
+    productMPCache,
   };
 }

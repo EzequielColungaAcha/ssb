@@ -24,13 +24,18 @@ export function ProductsView() {
   const {
     materiaPrima,
     getProductMateriaPrima,
+    getProductMateriaPrimaCached,
     setProductMateriaPrima,
     calculateProductCost,
     calculateAvailableStock,
+    productMPCache,
   } = useMateriaPrima();
   const [productStocks, setProductStocks] = useState<Record<string, number>>(
     {}
   );
+  const [productMinPrices, setProductMinPrices] = useState<
+    Record<string, number>
+  >({});
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -90,6 +95,34 @@ export function ProductsView() {
 
     loadStocks();
   }, [products, calculateAvailableStock]);
+
+  // Calculate minimum sale prices (base price + min variable ingredient prices)
+  useEffect(() => {
+    if (!products.length || productMPCache.size === 0) {
+      setProductMinPrices({});
+      return;
+    }
+
+    const minPrices: Record<string, number> = {};
+    for (const product of products) {
+      if (!product.uses_materia_prima) continue;
+
+      const links = getProductMateriaPrimaCached(product.id);
+      let additionalPrice = 0;
+
+      for (const link of links) {
+        if (link.is_variable && link.min_quantity && link.price_per_unit) {
+          additionalPrice += link.min_quantity * link.price_per_unit;
+        }
+      }
+
+      if (additionalPrice > 0) {
+        minPrices[product.id] = product.price + additionalPrice;
+      }
+    }
+
+    setProductMinPrices(minPrices);
+  }, [products, productMPCache, getProductMateriaPrimaCached]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1194,7 +1227,9 @@ export function ProductsView() {
                     className='font-bold'
                     style={{ color: 'var(--color-text)' }}
                   >
-                    {formatPrice(product.price)}
+                    {formatPrice(
+                      productMinPrices[product.id] || product.price
+                    )}
                   </span>
                 </div>
                 <div className='flex justify-between'>
@@ -1225,7 +1260,10 @@ export function ProductsView() {
                     className='font-bold'
                     style={{ color: 'var(--color-primary)' }}
                   >
-                    {formatPrice(product.price - product.production_cost)}
+                    {formatPrice(
+                      (productMinPrices[product.id] || product.price) -
+                        product.production_cost
+                    )}
                   </span>
                 </div>
                 <div className='flex justify-between'>
