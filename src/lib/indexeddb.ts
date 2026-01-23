@@ -378,6 +378,7 @@ class IndexedDBService {
       materia_prima,
       product_materia_prima,
       combos,
+      app_settings,
     ] = await Promise.all([
       this.getAll<Product>('products'),
       this.getAll<Sale>('sales'),
@@ -388,6 +389,7 @@ class IndexedDBService {
       this.getAll<MateriaPrima>('materia_prima'),
       this.getAll<ProductMateriaPrima>('product_materia_prima'),
       this.hasStore('combos') ? this.getAll<Combo>('combos') : [],
+      this.getAll<AppSettings>('app_settings'),
     ]);
 
     const data = {
@@ -400,6 +402,7 @@ class IndexedDBService {
       materia_prima,
       product_materia_prima,
       combos,
+      app_settings,
     };
 
     return JSON.stringify(data, null, 2);
@@ -417,6 +420,7 @@ class IndexedDBService {
     await this.clear('materia_prima');
     await this.clear('product_materia_prima');
     if (this.hasStore('combos')) await this.clear('combos');
+    await this.clear('app_settings');
 
     for (const product of data.products || []) {
       await this.add('products', product);
@@ -446,6 +450,9 @@ class IndexedDBService {
       for (const combo of data.combos || []) {
         await this.add('combos', combo);
       }
+    }
+    for (const setting of data.app_settings || []) {
+      await this.add('app_settings', setting);
     }
   }
 
