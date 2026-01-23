@@ -53,6 +53,8 @@ export function ProductsView() {
       max_quantity: string;
       default_quantity: string;
       price_per_unit: string;
+      linked_to: string;
+      linked_multiplier: string;
     }>
   >([]);
 
@@ -131,13 +133,15 @@ export function ProductsView() {
       if (usesMateriaPrima && productId) {
         const items = materiaPrimaItems.map((item) => ({
           materia_prima_id: item.materia_prima_id,
-          quantity: parseFloat(item.quantity),
+          quantity: parseFloat(item.quantity || '0'),
           removable: item.removable,
           is_variable: item.is_variable,
           min_quantity: item.is_variable ? parseFloat(item.min_quantity) : undefined,
           max_quantity: item.is_variable ? parseFloat(item.max_quantity) : undefined,
           default_quantity: item.is_variable ? parseFloat(item.default_quantity) : undefined,
           price_per_unit: item.is_variable ? parseFloat(item.price_per_unit) : undefined,
+          linked_to: item.linked_to || undefined,
+          linked_multiplier: item.linked_to ? parseFloat(item.linked_multiplier) : undefined,
         }));
         await setProductMateriaPrima(productId, items);
 
@@ -187,13 +191,15 @@ export function ProductsView() {
       setMateriaPrimaItems(
         items.map((item) => ({
           materia_prima_id: item.materia_prima_id,
-          quantity: item.quantity.toString(),
+          quantity: (item.quantity ?? 0).toString(),
           removable: item.removable ?? true,
           is_variable: item.is_variable ?? false,
           min_quantity: (item.min_quantity ?? 1).toString(),
           max_quantity: (item.max_quantity ?? 5).toString(),
           default_quantity: (item.default_quantity ?? 1).toString(),
           price_per_unit: (item.price_per_unit ?? 0).toString(),
+          linked_to: item.linked_to ?? '',
+          linked_multiplier: (item.linked_multiplier ?? 1).toString(),
         }))
       );
     } else {
@@ -327,6 +333,8 @@ export function ProductsView() {
         max_quantity: '5',
         default_quantity: '1',
         price_per_unit: '',
+        linked_to: '',
+        linked_multiplier: '1',
       },
     ]);
   };
@@ -345,12 +353,19 @@ export function ProductsView() {
       | 'min_quantity'
       | 'max_quantity'
       | 'default_quantity'
-      | 'price_per_unit',
+      | 'price_per_unit'
+      | 'linked_to'
+      | 'linked_multiplier',
     value: string | boolean
   ) => {
     const updated = [...materiaPrimaItems];
     if (field === 'removable' || field === 'is_variable') {
       updated[index][field] = value as boolean;
+      // Clear linked fields when changing to variable
+      if (field === 'is_variable' && value === true) {
+        updated[index].linked_to = '';
+        updated[index].linked_multiplier = '1';
+      }
     } else {
       updated[index][field] = value as string;
     }
@@ -811,6 +826,121 @@ export function ProductsView() {
                                 />
                               </div>
                             </div>
+                          )}
+
+                          {/* Linked ingredient options (only for non-variable items) */}
+                          {!item.is_variable && (
+                            <>
+                              <div className='mt-2 flex items-center gap-2'>
+                                <label
+                                  className='text-sm font-medium'
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  Vincular a ingrediente variable:
+                                </label>
+                                <select
+                                  value={item.linked_to}
+                                  onChange={(e) =>
+                                    updateMateriaPrimaItem(
+                                      index,
+                                      'linked_to',
+                                      e.target.value
+                                    )
+                                  }
+                                  className='flex-1 px-2 py-1 border rounded-lg text-sm'
+                                  style={{
+                                    backgroundColor:
+                                      'var(--color-background-secondary)',
+                                    color: 'var(--color-text)',
+                                    borderColor: 'var(--color-text)',
+                                  }}
+                                >
+                                  <option value=''>Sin vincular</option>
+                                  {materiaPrimaItems
+                                    .filter(
+                                      (otherItem, otherIndex) =>
+                                        otherItem.is_variable &&
+                                        otherIndex !== index &&
+                                        otherItem.materia_prima_id
+                                    )
+                                    .map((varItem) => {
+                                      const mp = materiaPrima.find(
+                                        (m) =>
+                                          m.id === varItem.materia_prima_id
+                                      );
+                                      return (
+                                        <option
+                                          key={varItem.materia_prima_id}
+                                          value={varItem.materia_prima_id}
+                                        >
+                                          {mp?.name || 'Desconocido'}
+                                        </option>
+                                      );
+                                    })}
+                                </select>
+                              </div>
+
+                              {item.linked_to && (
+                                <div className='mt-2 grid grid-cols-2 gap-4'>
+                                  <div>
+                                    <label
+                                      className='block text-sm mb-1'
+                                      style={{ color: 'var(--color-text)' }}
+                                    >
+                                      Multiplicador:
+                                    </label>
+                                    <input
+                                      type='number'
+                                      step='0.1'
+                                      min='0.1'
+                                      required
+                                      value={item.linked_multiplier}
+                                      onChange={(e) =>
+                                        updateMateriaPrimaItem(
+                                          index,
+                                          'linked_multiplier',
+                                          e.target.value
+                                        )
+                                      }
+                                      className='w-full px-2 py-1 border rounded-lg text-sm'
+                                      style={{
+                                        backgroundColor:
+                                          'var(--color-background-secondary)',
+                                        color: 'var(--color-text)',
+                                        borderColor: 'var(--color-text)',
+                                      }}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label
+                                      className='block text-sm mb-1'
+                                      style={{ color: 'var(--color-text)' }}
+                                    >
+                                      Offset (ej: -1):
+                                    </label>
+                                    <input
+                                      type='number'
+                                      step='1'
+                                      value={item.quantity}
+                                      onChange={(e) =>
+                                        updateMateriaPrimaItem(
+                                          index,
+                                          'quantity',
+                                          e.target.value
+                                        )
+                                      }
+                                      className='w-full px-2 py-1 border rounded-lg text-sm'
+                                      style={{
+                                        backgroundColor:
+                                          'var(--color-background-secondary)',
+                                        color: 'var(--color-text)',
+                                        borderColor: 'var(--color-text)',
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       ))}

@@ -125,6 +125,7 @@ interface SortableProductItemProps {
   onAddToCart: (product: Product) => void;
   onLongPress: (product: Product) => void;
   getStock: (product: Product) => number;
+  displayPrice: number;
   hasRemovableIngredients: boolean;
   isOutOfStock: boolean;
 }
@@ -135,6 +136,7 @@ function SortableProductItem({
   onAddToCart,
   onLongPress,
   getStock,
+  displayPrice,
   hasRemovableIngredients,
   isOutOfStock,
 }: SortableProductItemProps) {
@@ -248,7 +250,7 @@ function SortableProductItem({
         </div>
         <div>
           <div className='text-2xl font-bold mb-1'>
-            {formatPrice(product.price)}
+            {formatPrice(displayPrice)}
           </div>
           <div className='text-sm opacity-90'>
             Stock: {formatNumber(getStock(product))}
@@ -445,6 +447,9 @@ export function POSView() {
   const [productStocks, setProductStocks] = useState<Record<string, number>>(
     {}
   );
+  const [productMinPrices, setProductMinPrices] = useState<
+    Record<string, number>
+  >({});
   const [sortedProducts, setSortedProducts] = useState<Product[]>([]);
   const [isLayoutLocked, setIsLayoutLocked] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -658,6 +663,41 @@ export function POSView() {
 
     setProductStocks(Object.fromEntries(entries));
   }, [products, calculateAvailableStock]);
+
+  // Calculate minimum prices for products with variable ingredients
+  const loadMinimumPrices = useCallback(async () => {
+    const materiaPrimaProducts = products.filter((p) => p.uses_materia_prima);
+
+    if (materiaPrimaProducts.length === 0) {
+      setProductMinPrices({});
+      return;
+    }
+
+    const entries = await Promise.all(
+      materiaPrimaProducts.map(async (product) => {
+        const links = await getProductMateriaPrima(product.id);
+        let additionalPrice = 0;
+
+        for (const link of links) {
+          if (link.is_variable && link.min_quantity && link.price_per_unit) {
+            additionalPrice += link.min_quantity * link.price_per_unit;
+          }
+        }
+
+        return [product.id, product.price + additionalPrice] as const;
+      })
+    );
+
+    setProductMinPrices(Object.fromEntries(entries));
+  }, [products, getProductMateriaPrima]);
+
+  // Get display price including minimum variable ingredient costs
+  const getDisplayPrice = (product: Product) => {
+    if (product.uses_materia_prima && productMinPrices[product.id]) {
+      return productMinPrices[product.id];
+    }
+    return product.price;
+  };
 
   const getProductStock = (product: Product) => {
     if (product.uses_materia_prima) {
@@ -1236,6 +1276,7 @@ export function POSView() {
       removedIngredients: string[];
       category: string;
       combo_name?: string;
+      variableIngredients?: VariableIngredientSelection[];
     }>,
     total: number,
     scheduledTimeISO?: string,
@@ -1265,6 +1306,10 @@ export function POSView() {
             removed_ingredients: item.removedIngredients || [],
             combo_name: item.combo_name || null,
             category: item.category || 'otros',
+            variable_ingredients: item.variableIngredients?.map((v) => ({
+              name: v.name,
+              quantity: v.quantity,
+            })) || null,
           })),
           total,
           payment_method: paymentMethod,
@@ -1916,6 +1961,7 @@ export function POSView() {
             quantity: cartItem.quantity,
             removedIngredients: cartItem.removedIngredients || [],
             category: cartItem.category,
+            variableIngredients: cartItem.variableIngredients,
           });
         }
       }
@@ -1967,6 +2013,20 @@ export function POSView() {
         variableIngredients?: VariableIngredientSelection[]
       ) => {
         const links = await getProductMateriaPrima(productId);
+
+        // First pass: collect variable ingredient quantities for linked calculations
+        const variableQuantities = new Map<string, number>();
+        for (const link of links) {
+          if (link.is_variable) {
+            const varIng = variableIngredients?.find(
+              (v) => v.materia_prima_id === link.materia_prima_id
+            );
+            if (varIng) {
+              variableQuantities.set(link.materia_prima_id, varIng.quantity);
+            }
+          }
+        }
+
         for (const link of links) {
           // Skip if this ingredient was removed
           if (removedIngredients && removedIngredients.length > 0) {
@@ -1987,6 +2047,24 @@ export function POSView() {
               materiaPrimaDeductions.set(
                 link.materia_prima_id,
                 current + varIng.quantity * quantity
+              );
+            }
+            continue;
+          }
+
+          // Handle linked ingredients (dependent on variable ingredient quantity)
+          // Formula: (parentQty * multiplier + offset) * orderQuantity
+          if (link.linked_to && link.linked_multiplier) {
+            const parentQty = variableQuantities.get(link.linked_to);
+            if (parentQty !== undefined) {
+              const linkedQty =
+                (parentQty * link.linked_multiplier + (link.quantity || 0)) *
+                quantity;
+              const current =
+                materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+              materiaPrimaDeductions.set(
+                link.materia_prima_id,
+                current + linkedQty
               );
             }
             continue;
@@ -2189,6 +2267,7 @@ export function POSView() {
             quantity: cartItem.quantity,
             removedIngredients: cartItem.removedIngredients || [],
             category: cartItem.category,
+            variableIngredients: cartItem.variableIngredients,
           });
         }
       }
@@ -2230,6 +2309,20 @@ export function POSView() {
         variableIngredients?: VariableIngredientSelection[]
       ) => {
         const links = await getProductMateriaPrima(productId);
+
+        // First pass: collect variable ingredient quantities for linked calculations
+        const variableQuantities = new Map<string, number>();
+        for (const link of links) {
+          if (link.is_variable) {
+            const varIng = variableIngredients?.find(
+              (v) => v.materia_prima_id === link.materia_prima_id
+            );
+            if (varIng) {
+              variableQuantities.set(link.materia_prima_id, varIng.quantity);
+            }
+          }
+        }
+
         for (const link of links) {
           // Skip if this ingredient was removed
           if (removedIngredients && removedIngredients.length > 0) {
@@ -2250,6 +2343,24 @@ export function POSView() {
               materiaPrimaDeductions.set(
                 link.materia_prima_id,
                 current + varIng.quantity * quantity
+              );
+            }
+            continue;
+          }
+
+          // Handle linked ingredients (dependent on variable ingredient quantity)
+          // Formula: (parentQty * multiplier + offset) * orderQuantity
+          if (link.linked_to && link.linked_multiplier) {
+            const parentQty = variableQuantities.get(link.linked_to);
+            if (parentQty !== undefined) {
+              const linkedQty =
+                (parentQty * link.linked_multiplier + (link.quantity || 0)) *
+                quantity;
+              const current =
+                materiaPrimaDeductions.get(link.materia_prima_id) || 0;
+              materiaPrimaDeductions.set(
+                link.materia_prima_id,
+                current + linkedQty
               );
             }
             continue;
@@ -2700,6 +2811,10 @@ export function POSView() {
   }, [loadStocks]);
 
   useEffect(() => {
+    loadMinimumPrices();
+  }, [loadMinimumPrices]);
+
+  useEffect(() => {
     loadSettings();
     loadNextSaleNumber();
     // we no longer use global events for lock/save
@@ -3014,6 +3129,7 @@ export function POSView() {
                               onAddToCart={(p) => addToCart(p)}
                               onLongPress={handleProductLongPress}
                               getStock={getProductStock}
+                              displayPrice={getDisplayPrice(product)}
                               hasRemovableIngredients={productsWithRemovableIngredients.has(
                                 product.id
                               )}
@@ -5750,7 +5866,7 @@ export function POSView() {
             >
               <div className='text-lg font-bold mb-2'>{activeProduct.name}</div>
               <div className='text-2xl font-bold mb-1'>
-                {formatPrice(activeProduct.price)}
+                {formatPrice(getDisplayPrice(activeProduct))}
               </div>
               <div className='text-sm opacity-90'>
                 Stock: {formatNumber(getProductStock(activeProduct))}

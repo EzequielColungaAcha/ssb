@@ -151,6 +151,8 @@ export function useMateriaPrima() {
       max_quantity?: number;
       default_quantity?: number;
       price_per_unit?: number;
+      linked_to?: string;
+      linked_multiplier?: number;
     }>
   ) => {
     try {
@@ -179,6 +181,8 @@ export function useMateriaPrima() {
           max_quantity: item.max_quantity,
           default_quantity: item.default_quantity,
           price_per_unit: item.price_per_unit,
+          linked_to: item.linked_to,
+          linked_multiplier: item.linked_multiplier,
         };
         await db.add('product_materia_prima', newLink);
       }

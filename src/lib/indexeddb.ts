@@ -24,6 +24,9 @@ export interface ProductMateriaPrima {
   max_quantity?: number; // Maximum allowed (e.g., 5)
   price_per_unit?: number; // Price added per unit (e.g., $500 per bacon strip)
   default_quantity?: number; // Default quantity shown (e.g., 1)
+  // Linked ingredient fields (for dependent stock calculation)
+  linked_to?: string; // materia_prima_id of the parent variable ingredient
+  linked_multiplier?: number; // e.g., 2 means 2 of this per 1 of parent
 }
 
 export interface Product {
