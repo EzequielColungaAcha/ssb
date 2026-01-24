@@ -16,6 +16,7 @@ import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
 
 interface ProductSales {
+  product_id: string;
   product_name: string;
   quantity: number;
   revenue: number;
@@ -188,15 +189,16 @@ export function MetricsView() {
     );
 
     const productSales: {
-      [key: string]: { quantity: number; revenue: number; profit: number };
+      [key: string]: { product_name: string; quantity: number; revenue: number; profit: number };
     } = {};
     let profit = 0;
     let revenue = 0;
 
     // Process regular items
     regularItems.forEach((item: SaleItem) => {
-      if (!productSales[item.product_name]) {
-        productSales[item.product_name] = {
+      if (!productSales[item.product_id]) {
+        productSales[item.product_id] = {
+          product_name: item.product_name,
           quantity: 0,
           revenue: 0,
           profit: 0,
@@ -204,9 +206,9 @@ export function MetricsView() {
       }
       const itemProfit =
         (item.product_price - (item.production_cost || 0)) * item.quantity;
-      productSales[item.product_name].quantity += item.quantity;
-      productSales[item.product_name].revenue += item.subtotal;
-      productSales[item.product_name].profit += itemProfit;
+      productSales[item.product_id].quantity += item.quantity;
+      productSales[item.product_id].revenue += item.subtotal;
+      productSales[item.product_id].profit += itemProfit;
       profit += itemProfit;
       revenue += item.subtotal;
     });
@@ -237,8 +239,9 @@ export function MetricsView() {
       const instanceId = item.combo_instance_id || item.id;
 
       // Add combo product to product stats with individual values
-      if (!productSales[item.product_name]) {
-        productSales[item.product_name] = {
+      if (!productSales[item.product_id]) {
+        productSales[item.product_id] = {
+          product_name: item.product_name,
           quantity: 0,
           revenue: 0,
           profit: 0,
@@ -246,9 +249,9 @@ export function MetricsView() {
       }
       const itemProfit =
         (item.product_price - (item.production_cost || 0)) * item.quantity;
-      productSales[item.product_name].quantity += item.quantity;
-      productSales[item.product_name].revenue += item.product_price * item.quantity;
-      productSales[item.product_name].profit += itemProfit;
+      productSales[item.product_id].quantity += item.quantity;
+      productSales[item.product_id].revenue += item.product_price * item.quantity;
+      productSales[item.product_id].profit += itemProfit;
 
       // Add to totals only once per combo instance
       if (!processedComboInstances.has(instanceId)) {
@@ -265,8 +268,9 @@ export function MetricsView() {
     setFilteredRevenue(revenue);
 
     const allSoldProductsData = Object.entries(productSales)
-      .map(([name, data]) => ({
-        product_name: name,
+      .map(([id, data]) => ({
+        product_id: id,
+        product_name: data.product_name,
         quantity: data.quantity,
         revenue: data.revenue,
         profit: data.profit,
@@ -276,8 +280,9 @@ export function MetricsView() {
     const topProductsData = allSoldProductsData.slice(0, 5);
 
     const mostProfitableData = Object.entries(productSales)
-      .map(([name, data]) => ({
-        product_name: name,
+      .map(([id, data]) => ({
+        product_id: id,
+        product_name: data.product_name,
         quantity: data.quantity,
         revenue: data.revenue,
         profit: data.profit,
@@ -942,7 +947,7 @@ export function MetricsView() {
                 const productsByCategory = allSoldProducts.reduce(
                   (acc, product) => {
                     const productInfo = products.find(
-                      (p) => p.name === product.product_name
+                      (p) => p.id === product.product_id
                     );
                     const category = productInfo?.category || 'N/A';
                     if (!acc[category]) {
