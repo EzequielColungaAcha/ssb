@@ -161,6 +161,11 @@ export const translations = {
       'Personalizá el logo o siglas que aparecen cuando la barra lateral está contraída',
     acronym: 'Siglas',
     acronymPlaceholder: 'Ej: SSB',
+    checkForUpdates: 'Buscar Actualizaciones',
+    checkingUpdates: 'Buscando...',
+    updateFound: 'Nueva versión encontrada. Recargando...',
+    noUpdateAvailable: 'Ya tenés la última versión',
+    updateError: 'Error al buscar actualizaciones',
   },
   common: {
     loading: 'Cargando...',

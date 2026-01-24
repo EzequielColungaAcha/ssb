@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Upload, X, Settings, Monitor, Truck } from 'lucide-react';
+import { Palette, Type, Upload, X, Settings, Monitor, Truck, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLogo } from '../contexts/LogoContext';
@@ -43,6 +43,7 @@ export function SettingsView() {
   const [deliveryCharge, setDeliveryCharge] = useState<number>(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState<number>(0);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedRef = useRef(false);
 
@@ -272,6 +273,64 @@ export function SettingsView() {
     }
   };
 
+  const handleCheckForUpdates = async () => {
+    if (!('serviceWorker' in navigator)) {
+      toast.error(t.settings.updateError);
+      return;
+    }
+
+    setCheckingUpdate(true);
+
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (!registration) {
+        toast.info(t.settings.noUpdateAvailable);
+        setCheckingUpdate(false);
+        return;
+      }
+
+      // Force check for updates
+      await registration.update();
+
+      // Check if there's a waiting worker (new version ready)
+      if (registration.waiting) {
+        toast.success(t.settings.updateFound);
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        setTimeout(() => window.location.reload(), 1000);
+        return;
+      }
+
+      // Listen for new service worker installing
+      const handleUpdateFound = () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            toast.success(t.settings.updateFound);
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+            setTimeout(() => window.location.reload(), 1000);
+          }
+        });
+      };
+
+      registration.addEventListener('updatefound', handleUpdateFound);
+
+      // Wait a bit to see if an update is found
+      setTimeout(() => {
+        registration.removeEventListener('updatefound', handleUpdateFound);
+        setCheckingUpdate(false);
+        if (!registration.installing && !registration.waiting) {
+          toast.info(t.settings.noUpdateAvailable);
+        }
+      }, 3000);
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+      toast.error(t.settings.updateError);
+      setCheckingUpdate(false);
+    }
+  };
+
   return (
     <div className='p-6'>
       <div className='mb-6 relative'>
@@ -286,15 +345,33 @@ export function SettingsView() {
           Personalizá la apariencia y configuración de tu sistema de punto de
           venta
         </p>
-        <span
-          className='absolute top-0 right-0 px-3 py-1 rounded-full text-xs font-semibold'
-          style={{
-            backgroundColor: 'var(--color-background-accent)',
-            color: 'var(--color-text)',
-          }}
-        >
-          v{__APP_VERSION__}
-        </span>
+        <div className='absolute top-0 right-0 flex items-center gap-2'>
+          <button
+            onClick={handleCheckForUpdates}
+            disabled={checkingUpdate}
+            className='flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors hover:opacity-80 disabled:opacity-50'
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              color: '#fff',
+            }}
+            title={t.settings.checkForUpdates}
+          >
+            <RefreshCw
+              size={14}
+              className={checkingUpdate ? 'animate-spin' : ''}
+            />
+            {checkingUpdate ? t.settings.checkingUpdates : t.settings.checkForUpdates}
+          </button>
+          <span
+            className='px-3 py-1 rounded-full text-xs font-semibold'
+            style={{
+              backgroundColor: 'var(--color-background-accent)',
+              color: 'var(--color-text)',
+            }}
+          >
+            v{__APP_VERSION__}
+          </span>
+        </div>
       </div>
 
       <Card className='mb-6'>
