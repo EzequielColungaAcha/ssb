@@ -280,50 +280,25 @@ export function SettingsView() {
     }
 
     setCheckingUpdate(true);
+    toast.info(t.settings.checkingUpdates);
 
     try {
+      // Clear all caches
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map(name => caches.delete(name)));
+
+      // Unregister service worker
       const registration = await navigator.serviceWorker.getRegistration();
-      if (!registration) {
-        toast.info(t.settings.noUpdateAvailable);
-        setCheckingUpdate(false);
-        return;
+      if (registration) {
+        await registration.unregister();
       }
 
-      // Force check for updates
-      await registration.update();
-
-      // Check if there's a waiting worker (new version ready)
-      if (registration.waiting) {
-        toast.success(t.settings.updateFound);
-        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-        setTimeout(() => window.location.reload(), 1000);
-        return;
-      }
-
-      // Listen for new service worker installing
-      const handleUpdateFound = () => {
-        const newWorker = registration.installing;
-        if (!newWorker) return;
-
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            toast.success(t.settings.updateFound);
-            newWorker.postMessage({ type: 'SKIP_WAITING' });
-            setTimeout(() => window.location.reload(), 1000);
-          }
-        });
-      };
-
-      registration.addEventListener('updatefound', handleUpdateFound);
-
-      // Wait a bit to see if an update is found
+      toast.success(t.settings.updateFound);
+      
+      // Reload the page to get fresh content
       setTimeout(() => {
-        registration.removeEventListener('updatefound', handleUpdateFound);
-        setCheckingUpdate(false);
-        if (!registration.installing && !registration.waiting) {
-          toast.info(t.settings.noUpdateAvailable);
-        }
-      }, 3000);
+        window.location.reload();
+      }, 1000);
     } catch (error) {
       console.error('Error checking for updates:', error);
       toast.error(t.settings.updateError);

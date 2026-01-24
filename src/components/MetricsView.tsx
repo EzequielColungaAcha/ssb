@@ -959,7 +959,19 @@ export function MetricsView() {
                   {} as Record<string, typeof topProducts>
                 );
 
-                const sortedCategories = Object.keys(productsByCategory).sort();
+                const categoryOrder = ['hamburguesas', 'papas fritas', 'bebidas'];
+                const sortedCategories = Object.keys(productsByCategory).sort((a, b) => {
+                  const indexA = categoryOrder.indexOf(a.toLowerCase());
+                  const indexB = categoryOrder.indexOf(b.toLowerCase());
+                  // If both are in the order list, sort by their position
+                  if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                  // If only a is in the list, it comes first
+                  if (indexA !== -1) return -1;
+                  // If only b is in the list, it comes first
+                  if (indexB !== -1) return 1;
+                  // Otherwise sort alphabetically
+                  return a.localeCompare(b);
+                });
 
                 return sortedCategories.map((category) => (
                   <div key={category} className='space-y-2'>
