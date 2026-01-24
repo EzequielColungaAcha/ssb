@@ -172,11 +172,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
           },
         };
 
+      // Use AbortController for fetch timeout (3 seconds)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      try {
         await fetch(`${settings.kds_url}/api/theme`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(themeData),
+          signal: controller.signal,
         });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       } catch (error) {
         console.error('Error syncing theme to KDS:', error);
       }

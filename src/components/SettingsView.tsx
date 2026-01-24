@@ -47,16 +47,13 @@ export function SettingsView() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasLoadedRef = useRef(false);
 
-  // Store initial values to detect actual changes
-  const initialValuesRef = useRef<{
-    colors: typeof themeConfig;
-    acronym: string;
-    logoImage?: string;
-    kdsEnabled: boolean;
-    kdsUrl: string;
-    deliveryCharge: number;
-    freeDeliveryThreshold: number;
-  } | null>(null);
+  // Track if user has modified any field (triggers save on change)
+  const hasUserModifiedRef = useRef(false);
+
+  // Helper to mark form as modified
+  const markModified = () => {
+    hasUserModifiedRef.current = true;
+  };
 
   // Store functions in refs to avoid dependency issues
   const updateThemeConfigRef = useRef(updateThemeConfig);
@@ -67,26 +64,15 @@ export function SettingsView() {
   }, [updateThemeConfig, updateLogoConfig]);
 
   useEffect(() => {
-    setColors(themeConfig);
-    // Update initial values if they were already captured with different theme values
-    if (initialValuesRef.current && !isInitialized) {
-      initialValuesRef.current = {
-        ...initialValuesRef.current,
-        colors: themeConfig,
-      };
+    if (!isInitialized) {
+      setColors(themeConfig);
     }
   }, [themeConfig, isInitialized]);
 
   useEffect(() => {
-    setAcronym(logoConfig.acronym);
-    setLogoImage(logoConfig.logo_image);
-    // Update initial values if they were already captured with different logo values
-    if (initialValuesRef.current && !isInitialized) {
-      initialValuesRef.current = {
-        ...initialValuesRef.current,
-        acronym: logoConfig.acronym,
-        logoImage: logoConfig.logo_image,
-      };
+    if (!isInitialized) {
+      setAcronym(logoConfig.acronym);
+      setLogoImage(logoConfig.logo_image);
     }
   }, [logoConfig, isInitialized]);
 
@@ -109,17 +95,8 @@ export function SettingsView() {
         setDeliveryCharge(loadedDeliveryCharge);
         setFreeDeliveryThreshold(loadedFreeDeliveryThreshold);
 
-        // Store initial values after React has processed state updates
+        // Mark as initialized after React has processed state updates
         setTimeout(() => {
-          initialValuesRef.current = {
-            colors: themeConfig,
-            acronym: logoConfig.acronym,
-            logoImage: logoConfig.logo_image,
-            kdsEnabled: loadedKdsEnabled,
-            kdsUrl: loadedKdsUrl,
-            deliveryCharge: loadedDeliveryCharge,
-            freeDeliveryThreshold: loadedFreeDeliveryThreshold,
-          };
           setIsInitialized(true);
         }, 150);
       } catch (error) {
@@ -132,15 +109,10 @@ export function SettingsView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-save with debounce
+  // Auto-save with debounce when user modifies any field
   useEffect(() => {
-    // Don't save until initialized and initial values are captured
-    if (!isInitialized || !initialValuesRef.current) return;
-
-    // Check if any values have changed from initial
-    const currentValues = { colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold };
-    const hasChanges = JSON.stringify(currentValues) !== JSON.stringify(initialValuesRef.current);
-    if (!hasChanges) return;
+    // Don't save until initialized and user has made changes
+    if (!isInitialized || !hasUserModifiedRef.current) return;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -151,7 +123,6 @@ export function SettingsView() {
       try {
         await updateThemeConfigRef.current(colors);
         await updateLogoConfigRef.current({ acronym, logo_image: logoImage });
-
         await db.init();
         const existingSettings = (await db.get<AppSettings>(
           'app_settings',
@@ -170,7 +141,6 @@ export function SettingsView() {
           free_delivery_threshold: freeDeliveryThreshold,
           updated_at: new Date().toISOString(),
         };
-
         await db.put('app_settings', updatedSettings);
 
         // Sync theme to KDS after settings are saved using latest colors/mode
@@ -178,8 +148,8 @@ export function SettingsView() {
           await syncThemeToKDS(colors, theme);
         }
 
-        // Update initial values ref after successful save
-        initialValuesRef.current = { colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold };
+        // Reset modified flag after successful save
+        hasUserModifiedRef.current = false;
         
         toast.success(t.settings.successSaving);
       } catch (error) {
@@ -208,6 +178,7 @@ export function SettingsView() {
       | 'backgroundAccent',
     value: string
   ) => {
+    markModified();
     setColors({
       ...colors,
       [mode]: {
@@ -234,12 +205,14 @@ export function SettingsView() {
     const reader = new FileReader();
     reader.onload = (event) => {
       const result = event.target?.result as string;
+      markModified();
       setLogoImage(result);
     };
     reader.readAsDataURL(file);
   };
 
   const handleRemoveLogo = () => {
+    markModified();
     setLogoImage(undefined);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -247,6 +220,7 @@ export function SettingsView() {
   };
 
   const handleReset = () => {
+    markModified();
     const defaultConfig = {
       light: {
         primary: '#ef4444',
@@ -274,31 +248,45 @@ export function SettingsView() {
   };
 
   const handleCheckForUpdates = async () => {
-    if (!('serviceWorker' in navigator)) {
-      toast.error(t.settings.updateError);
-      return;
-    }
-
     setCheckingUpdate(true);
     toast.info(t.settings.checkingUpdates);
 
     try {
-      // Clear all caches
-      const cacheNames = await caches.keys();
-      await Promise.all(cacheNames.map(name => caches.delete(name)));
+      // Fetch version from KDS server
+      const response = await fetch(`${kdsUrl}/health`);
+      const data = await response.json();
+      const serverVersion = data.ssb_version;
 
-      // Unregister service worker
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration) {
-        await registration.unregister();
+      if (!serverVersion) {
+        toast.error(t.settings.updateError);
+        setCheckingUpdate(false);
+        return;
       }
 
-      toast.success(t.settings.updateFound);
-      
-      // Reload the page to get fresh content
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+      if (serverVersion !== __APP_VERSION__) {
+        // Update available - clear cache and reload
+        toast.success(`${t.settings.updateFound}: v${serverVersion}`);
+
+        if ('serviceWorker' in navigator) {
+          // Clear all caches
+          const cacheNames = await caches.keys();
+          await Promise.all(cacheNames.map(name => caches.delete(name)));
+
+          // Unregister service worker
+          const registration = await navigator.serviceWorker.getRegistration();
+          if (registration) {
+            await registration.unregister();
+          }
+        }
+
+        // Reload the page to get fresh content
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        toast.info(t.settings.noUpdateAvailable);
+        setCheckingUpdate(false);
+      }
     } catch (error) {
       console.error('Error checking for updates:', error);
       toast.error(t.settings.updateError);
@@ -410,7 +398,7 @@ export function SettingsView() {
             <Input
               id='acronym'
               value={acronym}
-              onChange={(e) => setAcronym(e.target.value.toUpperCase())}
+              onChange={(e) => { markModified(); setAcronym(e.target.value.toUpperCase()); }}
               placeholder={t.settings.acronymPlaceholder}
               maxLength={5}
               className='mt-2'
@@ -439,7 +427,7 @@ export function SettingsView() {
               type='checkbox'
               id='kds-enabled'
               checked={kdsEnabled}
-              onChange={(e) => setKdsEnabled(e.target.checked)}
+              onChange={(e) => { markModified(); setKdsEnabled(e.target.checked); }}
               className='w-5 h-5 rounded cursor-pointer'
             />
             <Label htmlFor='kds-enabled' className='cursor-pointer'>
@@ -454,7 +442,7 @@ export function SettingsView() {
                 id='kds-url'
                 type='url'
                 value={kdsUrl}
-                onChange={(e) => setKdsUrl(e.target.value)}
+                onChange={(e) => { markModified(); setKdsUrl(e.target.value); }}
                 placeholder='http://192.168.1.100:3001'
                 className='mt-2'
               />
@@ -485,7 +473,7 @@ export function SettingsView() {
               type='number'
               min='0'
               value={deliveryCharge}
-              onChange={(e) => setDeliveryCharge(Number(e.target.value) || 0)}
+              onChange={(e) => { markModified(); setDeliveryCharge(Number(e.target.value) || 0); }}
               placeholder='500'
               className='mt-2'
             />
@@ -501,7 +489,7 @@ export function SettingsView() {
               type='number'
               min='0'
               value={freeDeliveryThreshold}
-              onChange={(e) => setFreeDeliveryThreshold(Number(e.target.value) || 0)}
+              onChange={(e) => { markModified(); setFreeDeliveryThreshold(Number(e.target.value) || 0); }}
               placeholder='10000'
               className='mt-2'
             />
