@@ -461,6 +461,7 @@ export function POSView() {
   const [deliveryChargeAmount, setDeliveryChargeAmount] = useState(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedBurgerType, setSelectedBurgerType] = useState<'simple' | 'double' | 'triple' | null>(null);
   const [showKdsPanel, setShowKdsPanel] = useState(false);
   const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
   const [kdsConnectionStatus, setKdsConnectionStatus] = useState<
@@ -706,6 +707,28 @@ export function POSView() {
       return productStocks[product.id] || 0;
     }
     return product.stock;
+  };
+
+  const getBurgerType = (productName: string): 'simple' | 'double' | 'triple' => {
+    const lower = productName.toLowerCase();
+    if (lower.includes('triple')) return 'triple';
+    if (lower.includes('simple')) return 'simple';
+    return 'double'; // default when neither "simple" nor "triple" is in the name
+  };
+
+  const comboMatchesBurgerType = (combo: Combo, burgerType: 'simple' | 'double' | 'triple'): boolean => {
+    // Check if any product in any slot matches the burger type
+    for (const slot of combo.slots) {
+      for (const productId of slot.product_ids) {
+        const product = products.find((p) => p.id === productId);
+        if (product && product.category === 'hamburguesas') {
+          if (getBurgerType(product.name) === burgerType) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   };
 
   const activeProducts = sortedProducts.filter((p) => p.active);
@@ -2827,6 +2850,12 @@ export function POSView() {
     setSortedProducts(sorted);
   }, [products]);
 
+  useEffect(() => {
+    if (selectedCategory !== null && selectedCategory !== 'combos' && selectedCategory !== 'hamburguesas') {
+      setSelectedBurgerType(null);
+    }
+  }, [selectedCategory]);
+
   // Sync sorted combos with active combos (sorted by display_order)
   useEffect(() => {
     const active = combos.filter((c) => c.active);
@@ -2972,7 +3001,7 @@ export function POSView() {
         <div className='flex-1 overflow-auto scrollbar-hide relative'>
           {/* Sticky Category Filter Bar */}
           <div
-            className='sticky top-0 z-20 px-6 py-3 flex items-center justify-between gap-4'
+            className='sticky top-0 z-20 px-6 pb-1 pt-3 flex items-center justify-between gap-4'
             style={{ backgroundColor: 'var(--color-background)' }}
           >
             {/* Category Tabs */}
@@ -3045,6 +3074,79 @@ export function POSView() {
             </div>
           </div>
 
+          {/* Burger Type Filter Row - only show when relevant categories are selected */}
+          {(selectedCategory === null || selectedCategory === 'combos' || selectedCategory === 'hamburguesas') && (
+            <div
+              className='sticky top-0 z-20 px-6 pt-1 pb-3 flex gap-2 overflow-x-auto scrollbar-hide'
+              style={{ backgroundColor: 'var(--color-background)' }}
+            >
+              <button
+                onClick={() => setSelectedBurgerType(null)}
+                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
+                style={{
+                  backgroundColor:
+                    selectedBurgerType === null
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background-secondary)',
+                  color:
+                    selectedBurgerType === null
+                      ? 'var(--color-on-accent)'
+                      : 'var(--color-text)',
+                }}
+              >
+                Todos
+              </button>
+              <button
+                onClick={() => setSelectedBurgerType('simple')}
+                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
+                style={{
+                  backgroundColor:
+                    selectedBurgerType === 'simple'
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background-secondary)',
+                  color:
+                    selectedBurgerType === 'simple'
+                      ? 'var(--color-on-accent)'
+                      : 'var(--color-text)',
+                }}
+              >
+                Simple
+              </button>
+              <button
+                onClick={() => setSelectedBurgerType('double')}
+                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
+                style={{
+                  backgroundColor:
+                    selectedBurgerType === 'double'
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background-secondary)',
+                  color:
+                    selectedBurgerType === 'double'
+                      ? 'var(--color-on-accent)'
+                      : 'var(--color-text)',
+                }}
+              >
+                Doble
+              </button>
+              <button
+                onClick={() => setSelectedBurgerType('triple')}
+                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
+                style={{
+                  backgroundColor:
+                    selectedBurgerType === 'triple'
+                      ? 'var(--color-accent)'
+                      : 'var(--color-background-secondary)',
+                  color:
+                    selectedBurgerType === 'triple'
+                      ? 'var(--color-on-accent)'
+                      : 'var(--color-text)',
+                }}
+              >
+                Triple
+              </button>
+            </div>
+          )}
+
           <div className='p-6 pt-0'>
             <SortableContext
               items={categories.map((cat) => `category-${cat}`)}
@@ -3057,7 +3159,13 @@ export function POSView() {
                 .map((category) => {
                   // Handle combos category specially
                   if (category === 'combos') {
-                    const comboIds = sortedCombos.map((c) => `combo-${c.id}`);
+                    let filteredCombos = sortedCombos;
+                    if (selectedBurgerType !== null) {
+                      filteredCombos = sortedCombos.filter((combo) =>
+                        comboMatchesBurgerType(combo, selectedBurgerType)
+                      );
+                    }
+                    const comboIds = filteredCombos.map((c) => `combo-${c.id}`);
                     return (
                       <SortableCategory
                         key='combos'
@@ -3076,7 +3184,7 @@ export function POSView() {
                                 : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-3'
                             }`}
                           >
-                            {sortedCombos.map((combo) => (
+                            {filteredCombos.map((combo) => (
                               <SortableComboItem
                                 key={combo.id}
                                 combo={combo}
@@ -3093,9 +3201,13 @@ export function POSView() {
                     );
                   }
 
-                  const categoryProducts = activeProducts.filter(
-                    (p) => p.category === category
-                  );
+                  const categoryProducts = activeProducts.filter((p) => {
+                    if (p.category !== category) return false;
+                    if (category === 'hamburguesas' && selectedBurgerType !== null) {
+                      if (getBurgerType(p.name) !== selectedBurgerType) return false;
+                    }
+                    return true;
+                  });
                   const categoryProductIds = categoryProducts.map((p) => p.id);
 
                   return (

@@ -16,7 +16,7 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
-import { Sale, SaleItem } from '../lib/indexeddb';
+import { db, Sale, SaleItem, AppSettings, Product } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
@@ -255,6 +255,88 @@ export function SalesView() {
     } catch (error) {
       console.error('Error marking sale as paid:', error);
       toast.error('Error al registrar el pago');
+    }
+  };
+
+  const sendSaleToKDS = async () => {
+    if (!selectedSale || saleItems.length === 0) {
+      toast.error('No hay venta seleccionada o la venta no tiene artículos');
+      return;
+    }
+
+    try {
+      // Load KDS settings
+      await db.init();
+      const settings = await db.get<AppSettings>('app_settings', 'default');
+
+      if (!settings?.kds_enabled || !settings?.kds_url) {
+        toast.error('KDS no está habilitado o no hay URL configurada');
+        return;
+      }
+
+      // Fetch product categories for items
+      const itemsWithCategory = await Promise.all(
+        saleItems.map(async (item) => {
+          let category = 'otros';
+          try {
+            const product = await db.get<Product>('products', item.product_id);
+            if (product?.category) {
+              category = product.category;
+            }
+          } catch (error) {
+            console.warn(`Could not fetch category for product ${item.product_id}:`, error);
+          }
+
+          return {
+            product_name: item.product_name,
+            quantity: item.quantity,
+            product_price: item.product_price,
+            removed_ingredients: item.removed_ingredients || [],
+            combo_name: item.combo_name || null,
+            category: category,
+            variable_ingredients: item.variable_ingredients
+              ? item.variable_ingredients.map((v) => ({
+                  name: v.name,
+                  quantity: v.quantity,
+                }))
+              : null,
+          };
+        })
+      );
+
+      // Send to KDS
+      const response = await fetch(`${settings.kds_url}/api/orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sale_number: selectedSale.sale_number,
+          items: itemsWithCategory,
+          total: selectedSale.total_amount,
+          payment_method: selectedSale.payment_method,
+          scheduled_time: selectedSale.scheduled_time || null,
+          customer_name: selectedSale.customer_name || null,
+          order_type: selectedSale.order_type || null,
+          delivery_address:
+            selectedSale.order_type === 'delivery'
+              ? selectedSale.delivery_address || null
+              : null,
+          created_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to send order to KDS:', response.statusText, errorText);
+        toast.error(`Error al enviar a KDS: ${response.statusText}`);
+        return;
+      }
+
+      toast.success(`Venta #${selectedSale.sale_number} enviada a KDS correctamente`);
+    } catch (error) {
+      console.error('Error sending sale to KDS:', error);
+      toast.error('Error al enviar la venta a KDS');
     }
   };
 
@@ -984,6 +1066,22 @@ export function SalesView() {
                     </div>
                   </>
                 )}
+              </div>
+
+              {/* Send to KDS Button */}
+              <div className='mt-6'>
+                <button
+                  onClick={sendSaleToKDS}
+                  disabled={!selectedSale || saleItems.length === 0}
+                  className='w-full py-3 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all'
+                  style={{
+                    backgroundColor: 'var(--color-primary)',
+                    color: 'var(--color-on-primary)',
+                  }}
+                >
+                  <Truck size={18} />
+                  Enviar a KDS
+                </button>
               </div>
 
               {/* Mark as Paid Section - Only shows for unpaid sales */}
