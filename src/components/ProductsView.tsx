@@ -19,6 +19,7 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { Product, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { CombosView } from './CombosView';
+import { ViewLoader } from './LoadingScreen';
 
 export function ProductsView() {
   const [activeTab, setActiveTab] = useState<'products' | 'combos'>('products');
@@ -468,7 +469,7 @@ export function ProductsView() {
   };
 
   if (loading) {
-    return <div className='p-6 dark:text-white'>Cargando...</div>;
+    return <ViewLoader />;
   }
 
   // Tab selector

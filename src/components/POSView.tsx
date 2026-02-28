@@ -2012,6 +2012,7 @@ export function POSView() {
         combo_instance_id?: string;
         combo_slot_index?: number;
         combo_unit_price?: number;
+        variableIngredients?: VariableIngredientSelection[];
       }[] = [];
 
       for (const cartItem of cart) {
@@ -2321,6 +2322,7 @@ export function POSView() {
         combo_instance_id?: string;
         combo_slot_index?: number;
         combo_unit_price?: number;
+        variableIngredients?: VariableIngredientSelection[];
       }[] = [];
 
       for (const cartItem of cart) {

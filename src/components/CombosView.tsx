@@ -6,6 +6,7 @@ import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { Combo, ComboSlot, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice } from '../lib/utils';
+import { ViewLoader } from './LoadingScreen';
 
 interface SlotFormData {
   id: string;
@@ -378,7 +379,7 @@ export function CombosView() {
   };
 
   if (loading) {
-    return <div className='p-6 dark:text-white'>Cargando...</div>;
+    return <ViewLoader />;
   }
 
   return (

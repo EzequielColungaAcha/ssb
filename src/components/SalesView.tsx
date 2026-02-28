@@ -4,6 +4,7 @@ import {
   Package,
   History,
   User,
+  Monitor,
   Truck,
   Home,
   MapPin,
@@ -20,6 +21,7 @@ import { db, Sale, SaleItem, AppSettings, Product, KDSOrder, resolveKdsMode } fr
 import { formatPrice, formatNumber } from '../lib/utils';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
+import { ViewLoader } from './LoadingScreen';
 
 // Filter types
 type PaymentMethodFilter = 'cash' | 'online' | 'card' | 'on_delivery';
@@ -360,7 +362,7 @@ export function SalesView() {
   };
 
   if (loading) {
-    return <div className='p-6 dark:text-white'>Cargando...</div>;
+    return <ViewLoader />;
   }
 
   return (
@@ -1098,7 +1100,7 @@ export function SalesView() {
                     color: 'var(--color-on-primary)',
                   }}
                 >
-                  <Truck size={18} />
+                  <Monitor size={18} />
                   Enviar a KDS
                 </button>
               </div>

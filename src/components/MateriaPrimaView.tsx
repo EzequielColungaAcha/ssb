@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { MateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { ViewLoader } from './LoadingScreen';
 
 export function MateriaPrimaView() {
   const {
@@ -119,7 +120,7 @@ export function MateriaPrimaView() {
   };
 
   if (loading) {
-    return <div className='p-6 dark:text-white'>Cargando...</div>;
+    return <ViewLoader />;
   }
 
   return (
