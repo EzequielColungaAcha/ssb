@@ -1,5 +1,5 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 export interface MateriaPrima {
   id: string;
@@ -137,15 +137,45 @@ export interface LogoConfig {
   updated_at: string;
 }
 
+export type KdsMode = 'off' | 'local' | 'server';
+
 export interface AppSettings {
   id: string;
   pos_layout_locked: boolean;
   category_order?: string[];
-  kds_enabled?: boolean;
+  kds_enabled?: boolean; // DEPRECATED – kept for migration only
+  kds_mode?: KdsMode;
   kds_url?: string;
   delivery_charge?: number; // Flat fee for delivery
   free_delivery_threshold?: number; // Cart total above which delivery is free
+  hidden_categories?: string[]; // e.g. ["bebidas"] — categories hidden from POS
+  hide_combos?: boolean; // true => combos hidden from POS
   updated_at: string;
+}
+
+export interface KDSOrderItem {
+  product_name: string;
+  quantity: number;
+  product_price: number;
+  removed_ingredients?: string[];
+  combo_name?: string | null;
+  category?: string;
+  variable_ingredients?: { name: string; quantity: number }[] | null;
+}
+
+export interface KDSOrder {
+  id: string;
+  sale_number: string;
+  items: KDSOrderItem[];
+  total: number;
+  status: 'pending' | 'preparing' | 'on_delivery' | 'completed';
+  payment_method?: string;
+  scheduled_time?: string;
+  customer_name?: string;
+  order_type?: 'pickup' | 'delivery';
+  delivery_address?: string;
+  created_at: string;
+  finished_at?: string;
 }
 
 export interface ComboSlot {
@@ -277,6 +307,12 @@ class IndexedDBService {
           combosStore.createIndex('name', 'name', { unique: false });
           combosStore.createIndex('active', 'active', { unique: false });
         }
+
+        if (!db.objectStoreNames.contains('kds_orders')) {
+          const kdsStore = db.createObjectStore('kds_orders', { keyPath: 'id' });
+          kdsStore.createIndex('status', 'status', { unique: false });
+          kdsStore.createIndex('created_at', 'created_at', { unique: false });
+        }
       };
     });
   }
@@ -382,6 +418,7 @@ class IndexedDBService {
       product_materia_prima,
       combos,
       app_settings,
+      kds_orders,
     ] = await Promise.all([
       this.getAll<Product>('products'),
       this.getAll<Sale>('sales'),
@@ -393,6 +430,7 @@ class IndexedDBService {
       this.getAll<ProductMateriaPrima>('product_materia_prima'),
       this.hasStore('combos') ? this.getAll<Combo>('combos') : [],
       this.getAll<AppSettings>('app_settings'),
+      this.hasStore('kds_orders') ? this.getAll<KDSOrder>('kds_orders') : [],
     ]);
 
     const data = {
@@ -406,6 +444,7 @@ class IndexedDBService {
       product_materia_prima,
       combos,
       app_settings,
+      kds_orders,
     };
 
     return JSON.stringify(data, null, 2);
@@ -457,6 +496,12 @@ class IndexedDBService {
     for (const setting of data.app_settings || []) {
       await this.add('app_settings', setting);
     }
+    if (this.hasStore('kds_orders')) {
+      await this.clear('kds_orders');
+      for (const order of data.kds_orders || []) {
+        await this.add('kds_orders', order);
+      }
+    }
   }
 
   async resetDatabase(): Promise<void> {
@@ -473,8 +518,20 @@ class IndexedDBService {
     if (this.hasStore('combos')) {
       promises.push(this.clear('combos'));
     }
+    if (this.hasStore('kds_orders')) {
+      promises.push(this.clear('kds_orders'));
+    }
     await Promise.all(promises);
   }
 }
 
 export const db = new IndexedDBService();
+
+/** Resolve kds_mode from settings, handling migration from legacy kds_enabled boolean */
+export function resolveKdsMode(settings?: AppSettings | null): KdsMode {
+  if (!settings) return 'off';
+  if (settings.kds_mode) return settings.kds_mode;
+  // Legacy migration: kds_enabled true → server, false/undefined → off
+  if (settings.kds_enabled) return 'server';
+  return 'off';
+}

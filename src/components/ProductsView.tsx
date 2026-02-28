@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Edit2,
@@ -9,11 +9,14 @@ import {
   Beef,
   Download,
   Layers,
+  Eye,
+  EyeOff,
+  Power,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
-import { Product } from '../lib/indexeddb';
+import { Product, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { CombosView } from './CombosView';
 
@@ -68,6 +71,56 @@ export function ProductsView() {
     { value: 'papas fritas', label: 'Papas Fritas' },
     { value: 'bebidas', label: 'Bebidas' },
   ];
+
+  // Sub-tab for product categories
+  const [activeCategory, setActiveCategory] = useState<string>('hamburguesas');
+
+  // Hidden categories (not shown in POS)
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
+
+  // Load hidden categories from IndexedDB
+  useEffect(() => {
+    const load = async () => {
+      try {
+        await db.init();
+        const settings = await db.get<AppSettings>('app_settings', 'default');
+        if (settings?.hidden_categories) {
+          setHiddenCategories(settings.hidden_categories);
+        }
+      } catch (error) {
+        console.error('Error loading hidden categories:', error);
+      }
+    };
+    load();
+  }, []);
+
+  // Toggle category visibility in POS
+  const toggleCategoryVisibility = useCallback(async (categoryValue: string) => {
+    try {
+      await db.init();
+      const settings = await db.get<AppSettings>('app_settings', 'default');
+      const current = settings?.hidden_categories || [];
+      const updated = current.includes(categoryValue)
+        ? current.filter((c) => c !== categoryValue)
+        : [...current, categoryValue];
+
+      const updatedSettings: AppSettings = {
+        ...(settings || { id: 'default', pos_layout_locked: false, updated_at: new Date().toISOString() }),
+        hidden_categories: updated,
+        updated_at: new Date().toISOString(),
+      };
+      await db.put('app_settings', updatedSettings);
+      setHiddenCategories(updated);
+      toast.success(
+        updated.includes(categoryValue)
+          ? `Categoría oculta en POS`
+          : `Categoría visible en POS`
+      );
+    } catch (error) {
+      console.error('Error toggling category visibility:', error);
+      toast.error('Error al cambiar visibilidad');
+    }
+  }, []);
 
   useEffect(() => {
     if (!products.length) {
@@ -240,6 +293,15 @@ export function ProductsView() {
     }
 
     setShowForm(true);
+  };
+
+  const handleToggleActive = async (product: Product) => {
+    try {
+      await updateProduct(product.id, { active: !product.active });
+      toast.success(product.active ? 'Producto desactivado' : 'Producto activado');
+    } catch {
+      toast.error('Error al cambiar estado');
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -489,7 +551,10 @@ export function ProductsView() {
               Exportar Web
             </button>
             <button
-              onClick={() => setShowForm(true)}
+              onClick={() => {
+                setFormData({ ...formData, category: activeCategory });
+                setShowForm(true);
+              }}
               className='flex items-center gap-2 px-4 py-2 rounded-lg text-white font-semibold'
               style={{
                 backgroundColor: 'var(--color-primary)',
@@ -501,6 +566,61 @@ export function ProductsView() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Category sub-tabs */}
+      <div className='flex items-center gap-2 mb-4'>
+        <div
+          className='flex gap-1 p-1 rounded-lg flex-1'
+          style={{ backgroundColor: 'var(--color-background-accent)' }}
+        >
+          {categories.map((cat) => (
+            <button
+              key={cat.value}
+              onClick={() => setActiveCategory(cat.value)}
+              className='flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-colors text-sm'
+              style={{
+                backgroundColor:
+                  activeCategory === cat.value
+                    ? 'var(--color-primary)'
+                    : 'transparent',
+                color:
+                  activeCategory === cat.value
+                    ? 'var(--color-on-primary)'
+                    : 'var(--color-text)',
+              }}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
+        {/* Visibility toggle for the active category */}
+        <button
+          onClick={() => toggleCategoryVisibility(activeCategory)}
+          className='flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors'
+          style={{
+            backgroundColor: hiddenCategories.includes(activeCategory)
+              ? 'var(--color-background-accent)'
+              : 'var(--color-primary)',
+            color: hiddenCategories.includes(activeCategory)
+              ? 'var(--color-text)'
+              : 'var(--color-on-primary)',
+          }}
+          title={
+            hiddenCategories.includes(activeCategory)
+              ? 'Oculto en POS — clic para mostrar'
+              : 'Visible en POS — clic para ocultar'
+          }
+        >
+          {hiddenCategories.includes(activeCategory) ? (
+            <EyeOff size={16} />
+          ) : (
+            <Eye size={16} />
+          )}
+          {hiddenCategories.includes(activeCategory)
+            ? 'Oculto en POS'
+            : 'Visible en POS'}
+        </button>
       </div>
 
       {showForm && (
@@ -1151,7 +1271,7 @@ export function ProductsView() {
         </div>
       )}
 
-      {products.length === 0 ? (
+      {products.filter((p) => p.category === activeCategory).length === 0 ? (
         <div
           className='text-center py-12 rounded-lg'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
@@ -1165,7 +1285,7 @@ export function ProductsView() {
             className='text-lg opacity-60'
             style={{ color: 'var(--color-text)' }}
           >
-            No hay productos registrados
+            No hay productos en esta categoría
           </p>
           <p
             className='text-sm opacity-40 mt-2'
@@ -1176,7 +1296,7 @@ export function ProductsView() {
         </div>
       ) : (
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-          {products.map((product) => (
+          {products.filter((p) => p.category === activeCategory).map((product) => (
             <div
               key={product.id}
               className='rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow border-2 relative'
@@ -1317,6 +1437,21 @@ export function ProductsView() {
                 >
                   <Edit2 size={14} />
                   Editar
+                </button>
+                <button
+                  onClick={() => handleToggleActive(product)}
+                  className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
+                  style={{
+                    backgroundColor: product.active
+                      ? 'var(--color-background-accent)'
+                      : 'var(--color-primary)',
+                    color: product.active
+                      ? 'var(--color-text)'
+                      : 'var(--color-on-primary)',
+                  }}
+                >
+                  <Power size={14} />
+                  {product.active ? 'Desactivar' : 'Activar'}
                 </button>
                 <button
                   onClick={() => handleDelete(product.id)}

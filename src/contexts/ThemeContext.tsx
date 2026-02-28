@@ -5,7 +5,7 @@ import React, {
   useEffect,
   useCallback,
 } from 'react';
-import { db, LogoConfig, ThemeConfig, AppSettings } from '../lib/indexeddb';
+import { db, LogoConfig, ThemeConfig, AppSettings, resolveKdsMode } from '../lib/indexeddb';
 
 export type { ThemeConfig };
 
@@ -153,7 +153,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         await db.init();
         const settings = await db.get<AppSettings>('app_settings', 'default');
 
-        if (!settings?.kds_enabled || !settings?.kds_url) {
+        const mode = resolveKdsMode(settings);
+        if (mode !== 'server' || !settings?.kds_url) {
           return;
         }
 

@@ -16,7 +16,7 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { useSales } from '../hooks/useSales';
-import { db, Sale, SaleItem, AppSettings, Product } from '../lib/indexeddb';
+import { db, Sale, SaleItem, AppSettings, Product, KDSOrder, resolveKdsMode } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { useTheme } from '../contexts/ThemeContext';
 import { toast } from 'sonner';
@@ -268,9 +268,15 @@ export function SalesView() {
       // Load KDS settings
       await db.init();
       const settings = await db.get<AppSettings>('app_settings', 'default');
+      const mode = resolveKdsMode(settings);
 
-      if (!settings?.kds_enabled || !settings?.kds_url) {
-        toast.error('KDS no está habilitado o no hay URL configurada');
+      if (mode === 'off') {
+        toast.error('KDS no está habilitado');
+        return;
+      }
+
+      if (mode === 'server' && !settings?.kds_url) {
+        toast.error('No hay URL de servidor KDS configurada');
         return;
       }
 
@@ -304,26 +310,39 @@ export function SalesView() {
         })
       );
 
-      // Send to KDS
-      const response = await fetch(`${settings.kds_url}/api/orders`, {
+      const orderData = {
+        sale_number: selectedSale.sale_number,
+        items: itemsWithCategory,
+        total: selectedSale.total_amount,
+        payment_method: selectedSale.payment_method,
+        scheduled_time: selectedSale.scheduled_time || null,
+        customer_name: selectedSale.customer_name || null,
+        order_type: selectedSale.order_type || null,
+        delivery_address:
+          selectedSale.order_type === 'delivery'
+            ? selectedSale.delivery_address || null
+            : null,
+        created_at: new Date().toISOString(),
+      };
+
+      if (mode === 'local') {
+        const localOrder: KDSOrder = {
+          id: crypto.randomUUID(),
+          ...orderData,
+          status: 'pending',
+        } as KDSOrder;
+        await db.put('kds_orders', localOrder);
+        toast.success(`Venta #${selectedSale.sale_number} enviada a KDS correctamente`);
+        return;
+      }
+
+      // Server mode
+      const response = await fetch(`${settings!.kds_url}/api/orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          sale_number: selectedSale.sale_number,
-          items: itemsWithCategory,
-          total: selectedSale.total_amount,
-          payment_method: selectedSale.payment_method,
-          scheduled_time: selectedSale.scheduled_time || null,
-          customer_name: selectedSale.customer_name || null,
-          order_type: selectedSale.order_type || null,
-          delivery_address:
-            selectedSale.order_type === 'delivery'
-              ? selectedSale.delivery_address || null
-              : null,
-          created_at: new Date().toISOString(),
-        }),
+        body: JSON.stringify(orderData),
       });
 
       if (!response.ok) {

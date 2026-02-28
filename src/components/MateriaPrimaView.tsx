@@ -97,6 +97,16 @@ export function MateriaPrimaView() {
     });
   };
 
+  const handleQuickAdd = async (mp: MateriaPrima, amount: number) => {
+    try {
+      await updateMateriaPrima(mp.id, { stock: mp.stock + amount } as Partial<MateriaPrima>);
+      const label = mp.unit === 'kg' ? `${amount}kg` : `${amount} un.`;
+      toast.success(`+${label} agregado a ${mp.name}`);
+    } catch {
+      toast.error('Error al agregar stock');
+    }
+  };
+
   const handleCancel = () => {
     setFormData({
       name: '',
@@ -382,7 +392,23 @@ export function MateriaPrimaView() {
                 </div>
               </div>
 
-              <div className='flex gap-2 mt-4'>
+              <div className='flex gap-2 mt-3'>
+                {(mp.unit === 'kg' ? [0.5, 2.5, 10] : [1, 5, 10]).map((amount) => (
+                  <button
+                    key={amount}
+                    onClick={() => handleQuickAdd(mp, amount)}
+                    className='flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all hover:opacity-80'
+                    style={{
+                      backgroundColor: 'var(--color-primary)',
+                      color: 'var(--color-on-primary)',
+                    }}
+                  >
+                    +{amount}{mp.unit === 'kg' ? 'kg' : ' un.'}
+                  </button>
+                ))}
+              </div>
+
+              <div className='flex gap-2 mt-2'>
                 <button
                   onClick={() => handleEdit(mp)}
                   className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'

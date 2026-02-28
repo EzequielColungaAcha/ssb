@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Package, Download } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Plus, Edit2, Trash2, Save, X, Package, Download, Eye, EyeOff, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCombo } from '../hooks/useCombo';
 import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
-import { Combo, ComboSlot } from '../lib/indexeddb';
+import { Combo, ComboSlot, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice } from '../lib/utils';
 
 interface SlotFormData {
@@ -34,6 +34,43 @@ export function CombosView() {
   const [slots, setSlots] = useState<SlotFormData[]>([]);
 
   const activeProducts = products.filter((p) => p.active);
+
+  // Hide combos from POS toggle
+  const [hideCombos, setHideCombos] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        await db.init();
+        const settings = await db.get<AppSettings>('app_settings', 'default');
+        if (settings?.hide_combos !== undefined) {
+          setHideCombos(settings.hide_combos);
+        }
+      } catch (error) {
+        console.error('Error loading hide_combos setting:', error);
+      }
+    };
+    load();
+  }, []);
+
+  const toggleCombosVisibility = useCallback(async () => {
+    try {
+      await db.init();
+      const settings = await db.get<AppSettings>('app_settings', 'default');
+      const newValue = !hideCombos;
+      const updatedSettings: AppSettings = {
+        ...(settings || { id: 'default', pos_layout_locked: false, updated_at: new Date().toISOString() }),
+        hide_combos: newValue,
+        updated_at: new Date().toISOString(),
+      };
+      await db.put('app_settings', updatedSettings);
+      setHideCombos(newValue);
+      toast.success(newValue ? 'Combos ocultos en POS' : 'Combos visibles en POS');
+    } catch (error) {
+      console.error('Error toggling combos visibility:', error);
+      toast.error('Error al cambiar visibilidad');
+    }
+  }, [hideCombos]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,6 +198,15 @@ export function CombosView() {
         onClick: () => {},
       },
     });
+  };
+
+  const handleToggleActive = async (combo: Combo) => {
+    try {
+      await updateCombo(combo.id, { active: !combo.active });
+      toast.success(combo.active ? 'Combo desactivado' : 'Combo activado');
+    } catch {
+      toast.error('Error al cambiar estado');
+    }
   };
 
   const handleCancel = () => {
@@ -352,6 +398,26 @@ export function CombosView() {
         </div>
         {!showForm && (
           <div className='flex gap-2'>
+            <button
+              onClick={toggleCombosVisibility}
+              className='flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors'
+              style={{
+                backgroundColor: hideCombos
+                  ? 'var(--color-background-accent)'
+                  : 'var(--color-primary)',
+                color: hideCombos
+                  ? 'var(--color-text)'
+                  : 'var(--color-on-primary)',
+              }}
+              title={
+                hideCombos
+                  ? 'Oculto en POS — clic para mostrar'
+                  : 'Visible en POS — clic para ocultar'
+              }
+            >
+              {hideCombos ? <EyeOff size={16} /> : <Eye size={16} />}
+              {hideCombos ? 'Oculto en POS' : 'Visible en POS'}
+            </button>
             <button
               onClick={exportCombosForWeb}
               className='flex items-center gap-2 px-4 py-2 rounded-lg font-semibold'
@@ -965,6 +1031,21 @@ export function CombosView() {
                       }}
                     >
                       <Edit2 size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleToggleActive(combo)}
+                      className='flex justify-center items-center p-2 rounded-lg transition-colors'
+                      style={{
+                        backgroundColor: combo.active
+                          ? 'var(--color-background-accent)'
+                          : 'var(--color-primary)',
+                        color: combo.active
+                          ? 'var(--color-text)'
+                          : 'var(--color-on-primary)',
+                      }}
+                      title={combo.active ? 'Desactivar' : 'Activar'}
+                    >
+                      <Power size={18} />
                     </button>
                     <button
                       onClick={() => handleDelete(combo.id)}

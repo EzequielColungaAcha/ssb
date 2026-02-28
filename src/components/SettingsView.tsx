@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Palette, Type, Upload, X, Settings, Monitor, Truck, RefreshCw } from 'lucide-react';
+import { Palette, Type, Upload, X, Settings, Monitor, Truck, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLogo } from '../contexts/LogoContext';
@@ -15,7 +15,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
-import { db, AppSettings } from '../lib/indexeddb';
+import { db, AppSettings, KdsMode, resolveKdsMode } from '../lib/indexeddb';
 
 // Helper function to calculate contrast color (black or white) based on background luminance
 function getContrastColor(hexColor: string): string {
@@ -38,7 +38,7 @@ export function SettingsView() {
   );
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [kdsEnabled, setKdsEnabled] = useState(false);
+  const [kdsMode, setKdsMode] = useState<KdsMode>('off');
   const [kdsUrl, setKdsUrl] = useState('http://192.168.1.100:3001');
   const [deliveryCharge, setDeliveryCharge] = useState<number>(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState<number>(0);
@@ -85,12 +85,12 @@ export function SettingsView() {
       try {
         await db.init();
         const settings = await db.get<AppSettings>('app_settings', 'default');
-        const loadedKdsEnabled = settings?.kds_enabled || false;
+        const loadedKdsMode = resolveKdsMode(settings);
         const loadedKdsUrl = settings?.kds_url || 'http://192.168.1.100:3001';
         const loadedDeliveryCharge = settings?.delivery_charge || 0;
         const loadedFreeDeliveryThreshold = settings?.free_delivery_threshold || 0;
         
-        setKdsEnabled(loadedKdsEnabled);
+        setKdsMode(loadedKdsMode);
         setKdsUrl(loadedKdsUrl);
         setDeliveryCharge(loadedDeliveryCharge);
         setFreeDeliveryThreshold(loadedFreeDeliveryThreshold);
@@ -135,7 +135,8 @@ export function SettingsView() {
 
         const updatedSettings: AppSettings = {
           ...existingSettings,
-          kds_enabled: kdsEnabled,
+          kds_mode: kdsMode,
+          kds_enabled: kdsMode === 'server', // keep legacy field in sync
           kds_url: kdsUrl,
           delivery_charge: deliveryCharge,
           free_delivery_threshold: freeDeliveryThreshold,
@@ -144,7 +145,7 @@ export function SettingsView() {
         await db.put('app_settings', updatedSettings);
 
         // Sync theme to KDS after settings are saved using latest colors/mode
-        if (kdsEnabled && kdsUrl) {
+        if (kdsMode === 'server' && kdsUrl) {
           await syncThemeToKDS(colors, theme);
         }
 
@@ -165,7 +166,7 @@ export function SettingsView() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [isInitialized, colors, acronym, logoImage, kdsEnabled, kdsUrl, deliveryCharge, freeDeliveryThreshold, syncThemeToKDS, theme]);
+  }, [isInitialized, colors, acronym, logoImage, kdsMode, kdsUrl, deliveryCharge, freeDeliveryThreshold, syncThemeToKDS, theme]);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -295,7 +296,31 @@ export function SettingsView() {
   };
 
   return (
-    <div className='p-6'>
+    <div className='p-6 relative'>
+      {/* Saving Overlay */}
+      {saving && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm'>
+          <div
+            className='flex items-center gap-3 rounded-xl px-6 py-4 shadow-lg'
+            style={{
+              backgroundColor: 'var(--color-background-secondary)',
+            }}
+          >
+            <Loader2
+              className='animate-spin'
+              size={24}
+              style={{ color: 'var(--color-primary)' }}
+            />
+            <span
+              className='text-lg font-semibold'
+              style={{ color: 'var(--color-text)' }}
+            >
+              {t.settings.saving}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className='mb-6 relative'>
         <h1
           className='text-3xl font-bold flex items-center gap-3'
@@ -311,7 +336,7 @@ export function SettingsView() {
         <div className='absolute top-0 right-0 flex items-center gap-2'>
           <button
             onClick={handleCheckForUpdates}
-            disabled={checkingUpdate}
+            disabled={checkingUpdate || saving}
             className='flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors hover:opacity-80 disabled:opacity-50'
             style={{
               backgroundColor: 'var(--color-primary)',
@@ -362,6 +387,7 @@ export function SettingsView() {
                     variant='secondary'
                     size='sm'
                     onClick={handleRemoveLogo}
+                    disabled={saving}
                   >
                     <X size={16} className='mr-2' />
                     Eliminar Logo
@@ -376,10 +402,12 @@ export function SettingsView() {
                     accept='image/png,image/jpeg,image/jpg,image/svg+xml'
                     onChange={handleImageUpload}
                     className='hidden'
+                    disabled={saving}
                   />
                   <Button
                     variant='secondary'
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={saving}
                   >
                     <Upload size={16} className='mr-2' />
                     Subir Logo
@@ -402,6 +430,7 @@ export function SettingsView() {
               placeholder={t.settings.acronymPlaceholder}
               maxLength={5}
               className='mt-2'
+              disabled={saving}
             />
             <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
               Se mostrará cuando no haya logo o la barra esté expandida
@@ -422,29 +451,53 @@ export function SettingsView() {
           </CardDescription>
         </CardHeader>
         <CardContent className='space-y-4'>
-          <div className='flex items-center gap-3'>
-            <input
-              type='checkbox'
-              id='kds-enabled'
-              checked={kdsEnabled}
-              onChange={(e) => { markModified(); setKdsEnabled(e.target.checked); }}
-              className='w-5 h-5 rounded cursor-pointer'
-            />
-            <Label htmlFor='kds-enabled' className='cursor-pointer'>
-              Enviar pedidos al KDS automáticamente
-            </Label>
+          <div>
+            <Label className='mb-2 block'>Modo KDS</Label>
+            <div className='flex gap-2'>
+              {([
+                { value: 'off', label: 'Desactivado' },
+                { value: 'local', label: 'Local' },
+                { value: 'server', label: 'Servidor' },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  type='button'
+                  onClick={() => { markModified(); setKdsMode(opt.value); }}
+                  disabled={saving}
+                  className='px-4 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50'
+                  style={{
+                    backgroundColor:
+                      kdsMode === opt.value
+                        ? 'var(--color-accent)'
+                        : 'var(--color-background-secondary)',
+                    color:
+                      kdsMode === opt.value
+                        ? 'var(--color-on-accent)'
+                        : 'var(--color-text)',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+              {kdsMode === 'off' && 'KDS desactivado. Los pedidos no se enviarán al sistema de cocina.'}
+              {kdsMode === 'local' && 'Los pedidos se guardan localmente en este dispositivo.'}
+              {kdsMode === 'server' && 'Los pedidos se envían a un servidor KDS remoto.'}
+            </p>
           </div>
 
-          {kdsEnabled && (
+          {kdsMode === 'server' && (
             <div>
               <Label htmlFor='kds-url'>URL del servidor KDS</Label>
               <Input
-                id='kds-url'
-                type='url'
-                value={kdsUrl}
-                onChange={(e) => { markModified(); setKdsUrl(e.target.value); }}
-                placeholder='http://192.168.1.100:3001'
-                className='mt-2'
+              id='kds-url'
+              type='url'
+              value={kdsUrl}
+              onChange={(e) => { markModified(); setKdsUrl(e.target.value); }}
+              placeholder='http://192.168.1.100:3001'
+              className='mt-2'
+              disabled={saving}
               />
               <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
                 Ingresá la dirección IP y puerto del servidor KDS (ejemplo:
@@ -476,6 +529,7 @@ export function SettingsView() {
               onChange={(e) => { markModified(); setDeliveryCharge(Number(e.target.value) || 0); }}
               placeholder='500'
               className='mt-2'
+              disabled={saving}
             />
             <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
               Monto fijo que se agrega al total cuando el pedido es delivery
@@ -492,6 +546,7 @@ export function SettingsView() {
               onChange={(e) => { markModified(); setFreeDeliveryThreshold(Number(e.target.value) || 0); }}
               placeholder='10000'
               className='mt-2'
+              disabled={saving}
             />
             <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
               Si el subtotal del carrito supera este monto, el delivery es gratis. Dejá en 0 para desactivar.
@@ -536,7 +591,8 @@ export function SettingsView() {
                         onChange={(e) =>
                           handleColorChange('light', key, e.target.value)
                         }
-                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600'
+                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed'
+                        disabled={saving}
                       />
                       <Input
                         type='text'
@@ -545,6 +601,7 @@ export function SettingsView() {
                           handleColorChange('light', key, e.target.value)
                         }
                         className='flex-1'
+                        disabled={saving}
                       />
                     </div>
                   </div>
@@ -691,7 +748,8 @@ export function SettingsView() {
                         onChange={(e) =>
                           handleColorChange('dark', key, e.target.value)
                         }
-                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600'
+                        className='w-10 h-10 rounded cursor-pointer border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed'
+                        disabled={saving}
                       />
                       <Input
                         type='text'
@@ -700,6 +758,7 @@ export function SettingsView() {
                           handleColorChange('dark', key, e.target.value)
                         }
                         className='flex-1'
+                        disabled={saving}
                       />
                     </div>
                   </div>
@@ -819,17 +878,9 @@ export function SettingsView() {
           </div>
 
           <div className='flex gap-3 pt-4 items-center'>
-            <Button onClick={handleReset} variant='secondary'>
+            <Button onClick={handleReset} variant='secondary' disabled={saving}>
               {t.settings.resetToDefault}
             </Button>
-            {saving && (
-              <span
-                className='text-sm opacity-60'
-                style={{ color: 'var(--color-text)' }}
-              >
-                {t.settings.saving}
-              </span>
-            )}
           </div>
         </CardContent>
       </Card>

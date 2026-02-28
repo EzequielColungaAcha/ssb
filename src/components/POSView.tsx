@@ -54,6 +54,10 @@ import {
   Sale,
   Combo,
   MateriaPrima,
+  KdsMode,
+  KDSOrder,
+  KDSOrderItem,
+  resolveKdsMode,
 } from '../lib/indexeddb';
 import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
@@ -82,27 +86,7 @@ interface CartItem extends Product {
   comboSelections?: ComboSelection[];
 }
 
-interface KDSOrderItem {
-  product_name: string;
-  quantity: number;
-  product_price: number;
-  removed_ingredients?: string[];
-  combo_name?: string;
-}
-
-interface KDSOrder {
-  id: string;
-  sale_number: string;
-  items: KDSOrderItem[];
-  total: number;
-  status: 'pending' | 'preparing' | 'on_delivery' | 'completed';
-  scheduled_time?: string;
-  customer_name?: string;
-  order_type?: 'pickup' | 'delivery';
-  delivery_address?: string;
-  created_at: string;
-  finished_at?: string;
-}
+// KDSOrder and KDSOrderItem are now imported from indexeddb.ts
 
 interface IngredientInfo {
   id: string;
@@ -266,6 +250,7 @@ interface SortableComboItemProps {
   isLocked: boolean;
   onOpenComboModal: (combo: Combo) => void;
   isOutOfStock: boolean;
+  stockCount: number;
 }
 
 function SortableComboItem({
@@ -273,6 +258,7 @@ function SortableComboItem({
   isLocked,
   onOpenComboModal,
   isOutOfStock,
+  stockCount,
 }: SortableComboItemProps) {
   const {
     attributes,
@@ -330,7 +316,7 @@ function SortableComboItem({
           </div>
         )}
         <div>
-          <div className='text-lg font-bold mb-2'>{combo.name}</div>
+          <div className='text-lg font-bold mb-2'>{combo.name.replace('Combo', '')}</div>
         </div>
         <div>
           <div className='text-2xl font-bold mb-1'>
@@ -340,9 +326,15 @@ function SortableComboItem({
               ? `-${combo.discount_value}%`
               : `-${formatPrice(combo.discount_value || 0)}`}
           </div>
+          <div className='flex items-center gap-2'>
           <div className='text-sm opacity-90'>
             {combo.slots.length} producto
             {combo.slots.length !== 1 ? 's' : ''}
+          </div>
+          <div className='text-sm opacity-90'>|</div>
+          <div className='text-sm opacity-90'>
+            Stock: {stockCount}
+          </div>
           </div>
         </div>
         <div
@@ -456,12 +448,14 @@ export function POSView() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [categoryOrder, setCategoryOrder] = useState<string[]>([]);
   const [nextSaleNumber, setNextSaleNumber] = useState<number | null>(null);
-  const [kdsEnabled, setKdsEnabled] = useState(false);
+  const [kdsMode, setKdsMode] = useState<KdsMode>('off');
   const [kdsUrl, setKdsUrl] = useState('');
   const [deliveryChargeAmount, setDeliveryChargeAmount] = useState(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedBurgerType, setSelectedBurgerType] = useState<'simple' | 'double' | 'triple' | null>(null);
+  const [hiddenCategories, setHiddenCategories] = useState<string[]>([]);
+  const [hideCombos, setHideCombos] = useState(false);
   const [showKdsPanel, setShowKdsPanel] = useState(false);
   const [kdsOrders, setKdsOrders] = useState<KDSOrder[]>([]);
   const [kdsConnectionStatus, setKdsConnectionStatus] = useState<
@@ -594,6 +588,9 @@ export function POSView() {
   const [comboStockStatus, setComboStockStatus] = useState<
     Record<string, boolean>
   >({});
+  const [comboStockCounts, setComboStockCounts] = useState<
+    Record<string, number>
+  >({});
 
   // Track which products have removable ingredients
   const [
@@ -632,12 +629,14 @@ export function POSView() {
         if (settings.category_order) {
           setCategoryOrder(settings.category_order);
         }
-        setKdsEnabled(settings.kds_enabled || false);
+        setKdsMode(resolveKdsMode(settings));
         setKdsUrl(settings.kds_url || '');
         setDeliveryChargeAmount(settings.delivery_charge || 0);
         setFreeDeliveryThreshold(settings.free_delivery_threshold || 0);
+        setHiddenCategories(settings.hidden_categories || []);
+        setHideCombos(settings.hide_combos || false);
         console.log('KDS Settings loaded:', {
-          kdsEnabled: settings.kds_enabled,
+          kdsMode: resolveKdsMode(settings),
           kdsUrl: settings.kds_url,
         });
       } else {
@@ -735,11 +734,11 @@ export function POSView() {
 
   const productCategories = Array.from(
     new Set(activeProducts.map((p) => p.category))
-  );
+  ).filter((cat) => !hiddenCategories.includes(cat));
 
-  // Include "combos" as a category if there are active combos
+  // Include "combos" as a category if there are active combos and combos are not hidden
   const allCategories =
-    activeCombos.length > 0
+    activeCombos.length > 0 && !hideCombos
       ? [...productCategories, 'combos']
       : productCategories;
 
@@ -1312,62 +1311,101 @@ export function POSView() {
     try {
       await db.init();
       const settings = await db.get<AppSettings>('app_settings', 'default');
+      const mode = resolveKdsMode(settings);
 
-      if (!settings?.kds_enabled || !settings?.kds_url) {
-        return;
-      }
+      if (mode === 'off') return;
 
-      const response = await fetch(`${settings.kds_url}/api/orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sale_number: saleNumber,
-          items: items.map((item) => ({
-            product_name: item.product_name,
-            quantity: item.quantity,
-            product_price: item.product_price,
-            removed_ingredients: item.removedIngredients || [],
-            combo_name: item.combo_name || null,
-            category: item.category || 'otros',
-            variable_ingredients: item.variableIngredients?.map((v) => ({
-              name: v.name,
-              quantity: v.quantity,
-            })) || null,
-          })),
-          total,
-          payment_method: paymentMethod,
-          scheduled_time: scheduledTimeISO,
-          customer_name: customerNameParam || null,
-          order_type: orderTypeParam || null,
-          delivery_address:
-            orderTypeParam === 'delivery' ? deliveryAddressParam || null : null,
-          created_at: new Date().toISOString(),
-        }),
-      });
+      const orderData = {
+        sale_number: saleNumber,
+        items: items.map((item) => ({
+          product_name: item.product_name,
+          quantity: item.quantity,
+          product_price: item.product_price,
+          removed_ingredients: item.removedIngredients || [],
+          combo_name: item.combo_name || null,
+          category: item.category || 'otros',
+          variable_ingredients: item.variableIngredients?.map((v) => ({
+            name: v.name,
+            quantity: v.quantity,
+          })) || null,
+        })),
+        total,
+        payment_method: paymentMethod,
+        scheduled_time: scheduledTimeISO,
+        customer_name: customerNameParam || null,
+        order_type: orderTypeParam || null,
+        delivery_address:
+          orderTypeParam === 'delivery' ? deliveryAddressParam || null : null,
+        created_at: new Date().toISOString(),
+      };
 
-      if (!response.ok) {
-        console.error('Failed to send order to KDS:', response.statusText);
+      if (mode === 'local') {
+        // Store order locally in IndexedDB
+        const localOrder: KDSOrder = {
+          id: crypto.randomUUID(),
+          ...orderData,
+          status: 'pending',
+        } as KDSOrder;
+        await db.put('kds_orders', localOrder);
+      } else {
+        // Server mode — POST to remote KDS
+        if (!settings?.kds_url) return;
+        const response = await fetch(`${settings.kds_url}/api/orders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(orderData),
+        });
+        if (!response.ok) {
+          console.error('Failed to send order to KDS:', response.statusText);
+        }
       }
     } catch (error) {
       console.error('Error sending order to KDS:', error);
     }
   };
 
+  const sortKdsOrders = (orders: KDSOrder[]): KDSOrder[] => {
+    return [...orders].sort((a, b) => {
+      const aHasTime = !!a.scheduled_time;
+      const bHasTime = !!b.scheduled_time;
+      if (!aHasTime && bHasTime) return -1;
+      if (aHasTime && !bHasTime) return 1;
+      if (!aHasTime && !bHasTime) {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      return new Date(a.scheduled_time!).getTime() - new Date(b.scheduled_time!).getTime();
+    });
+  };
+
   const fetchKdsOrders = useCallback(async () => {
     // Read settings directly from IndexedDB to ensure we have the latest
     await db.init();
     const settings = await db.get<AppSettings>('app_settings', 'default');
+    const mode = resolveKdsMode(settings);
 
-    const effectiveKdsEnabled = settings?.kds_enabled || false;
+    if (mode === 'off') {
+      console.log('fetchKdsOrders: skipped (disabled)');
+      return;
+    }
+
+    if (mode === 'local') {
+      try {
+        const allOrders = await db.getAll<KDSOrder>('kds_orders');
+        const activeOrders = allOrders.filter(
+          (o) => o.status === 'pending' || o.status === 'on_delivery'
+        );
+        setKdsOrders(sortKdsOrders(activeOrders));
+        console.log('fetchKdsOrders (local): loaded', activeOrders.length, 'orders');
+      } catch (error) {
+        console.error('Error loading local KDS orders:', error);
+      }
+      return;
+    }
+
+    // Server mode
     const effectiveKdsUrl = settings?.kds_url || '';
-
-    if (!effectiveKdsEnabled || !effectiveKdsUrl) {
-      console.log('fetchKdsOrders: skipped (disabled or no URL)', {
-        kdsEnabled: effectiveKdsEnabled,
-        kdsUrl: effectiveKdsUrl,
-      });
+    if (!effectiveKdsUrl) {
+      console.log('fetchKdsOrders: skipped (no URL)');
       return;
     }
 
@@ -1400,34 +1438,8 @@ export function POSView() {
           }
         });
 
-        // Sort orders:
-        // 1. Orders without scheduled time first (sorted by created_at)
-        // 2. Orders with scheduled time (sorted by scheduled_time)
-        const sortedOrders = [...orders].sort((a, b) => {
-          const aHasTime = !!a.scheduled_time;
-          const bHasTime = !!b.scheduled_time;
-
-          // No time first
-          if (!aHasTime && bHasTime) return -1;
-          if (aHasTime && !bHasTime) return 1;
-
-          // Both have no time - sort by created_at
-          if (!aHasTime && !bHasTime) {
-            return (
-              new Date(a.created_at).getTime() -
-              new Date(b.created_at).getTime()
-            );
-          }
-
-          // Both have time - sort by scheduled_time
-          return (
-            new Date(a.scheduled_time!).getTime() -
-            new Date(b.scheduled_time!).getTime()
-          );
-        });
-
-        setKdsOrders(sortedOrders);
-        console.log('fetchKdsOrders: received', sortedOrders.length, 'orders');
+        setKdsOrders(sortKdsOrders(orders));
+        console.log('fetchKdsOrders: received', orders.length, 'orders');
       } else {
         console.error(
           'fetchKdsOrders: request failed',
@@ -1444,20 +1456,21 @@ export function POSView() {
     }
   }, []);
 
-  // WebSocket connection for real-time KDS updates
+  // WebSocket connection for real-time KDS updates (server mode only)
   const connectKdsWebSocket = useCallback(async () => {
     // Read settings directly from IndexedDB
     await db.init();
     const settings = await db.get<AppSettings>('app_settings', 'default');
+    const mode = resolveKdsMode(settings);
 
-    const effectiveKdsEnabled = settings?.kds_enabled || false;
+    if (mode !== 'server') {
+      console.log('KDS WebSocket: skipped (mode is not server)');
+      return;
+    }
+
     const effectiveKdsUrl = settings?.kds_url || '';
-
-    if (!effectiveKdsEnabled || !effectiveKdsUrl) {
-      console.log('KDS WebSocket: disabled or no URL', {
-        kdsEnabled: effectiveKdsEnabled,
-        kdsUrl: effectiveKdsUrl,
-      });
+    if (!effectiveKdsUrl) {
+      console.log('KDS WebSocket: no URL configured');
       return;
     }
 
@@ -1574,62 +1587,77 @@ export function POSView() {
     orderId: string,
     status: 'pending' | 'preparing' | 'on_delivery' | 'completed'
   ) => {
+    const handleStatusUpdateSuccess = async () => {
+      const kdsOrder = kdsOrders.find((o) => o.id === orderId);
+
+      if (status === 'completed') {
+        finishedOrdersRef.current.add(orderId);
+        setTimeout(() => {
+          setKdsOrders((prev) => prev.filter((o) => o.id !== orderId));
+          finishedOrdersRef.current.delete(orderId);
+        }, 2000);
+
+        if (kdsOrder && kdsOrder.order_type === 'delivery') {
+          try {
+            const matchingSale = sales.find(
+              (s) => s.sale_number === kdsOrder.sale_number
+            );
+            if (matchingSale) {
+              await updateSale(matchingSale.id, {
+                delivered_at: new Date().toISOString(),
+              });
+            }
+          } catch (error) {
+            console.error('Error updating sale delivered_at:', error);
+          }
+        }
+      }
+      setKdsOrders((prev) =>
+        prev.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                status,
+                finished_at:
+                  status === 'completed'
+                    ? new Date().toISOString()
+                    : undefined,
+              }
+            : order
+        )
+      );
+    };
+
+    if (kdsMode === 'local') {
+      try {
+        await db.init();
+        const order = await db.get<KDSOrder>('kds_orders', orderId);
+        if (order) {
+          await db.put('kds_orders', {
+            ...order,
+            status,
+            finished_at: status === 'completed' ? new Date().toISOString() : undefined,
+          });
+        }
+        await handleStatusUpdateSuccess();
+      } catch (error) {
+        console.error('Error updating local KDS order status:', error);
+      }
+      return;
+    }
+
+    // Server mode
     if (!kdsUrl) return;
 
     try {
       const response = await fetch(`${kdsUrl}/api/orders/${orderId}/status`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
 
       if (response.ok) {
-        // Find the KDS order to get sale_number and order_type
-        const kdsOrder = kdsOrders.find((o) => o.id === orderId);
-
-        if (status === 'completed') {
-          finishedOrdersRef.current.add(orderId);
-          // Auto-remove after 2 seconds
-          setTimeout(() => {
-            setKdsOrders((prev) => prev.filter((o) => o.id !== orderId));
-            finishedOrdersRef.current.delete(orderId);
-          }, 2000);
-
-          // If this is a delivery order, update the local Sale with delivered_at
-          if (kdsOrder && kdsOrder.order_type === 'delivery') {
-            try {
-              // Find the sale by sale_number
-              const allSales = sales;
-              const matchingSale = allSales.find(
-                (s) => s.sale_number === kdsOrder.sale_number
-              );
-              if (matchingSale) {
-                await updateSale(matchingSale.id, {
-                  delivered_at: new Date().toISOString(),
-                });
-              }
-            } catch (error) {
-              console.error('Error updating sale delivered_at:', error);
-            }
-          }
-        }
-        // Update local state immediately
-        setKdsOrders((prev) =>
-          prev.map((order) =>
-            order.id === orderId
-              ? {
-                  ...order,
-                  status,
-                  finished_at:
-                    status === 'completed'
-                      ? new Date().toISOString()
-                      : undefined,
-                }
-              : order
-          )
-        );
+        await handleStatusUpdateSuccess();
       }
     } catch (error) {
       console.error('Error updating KDS order status:', error);
@@ -1643,8 +1671,6 @@ export function POSView() {
     itemIndex: number,
     ingredientName: string
   ) => {
-    if (!kdsUrl) return;
-
     const order = kdsOrders.find((o) => o.id === orderId);
     if (!order) return;
 
@@ -1664,6 +1690,23 @@ export function POSView() {
       prev.map((o) => (o.id === orderId ? { ...o, items: newItems } : o))
     );
 
+    if (kdsMode === 'local') {
+      try {
+        await db.init();
+        const existing = await db.get<KDSOrder>('kds_orders', orderId);
+        if (existing) {
+          await db.put('kds_orders', { ...existing, items: newItems });
+        }
+      } catch (error) {
+        setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+        console.error('Error updating local KDS order ingredients:', error);
+        toast.error('Error al actualizar ingredientes');
+      }
+      return;
+    }
+
+    // Server mode
+    if (!kdsUrl) return;
     try {
       const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
         method: 'PUT',
@@ -1675,12 +1718,10 @@ export function POSView() {
       });
 
       if (!response.ok) {
-        // Revert on failure
         setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
         toast.error('Error al actualizar ingredientes');
       }
     } catch (error) {
-      // Revert on error
       setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
       console.error('Error updating KDS order ingredients:', error);
       toast.error('Error al actualizar ingredientes');
@@ -1689,8 +1730,6 @@ export function POSView() {
 
   // Update KDS order address
   const updateKdsOrderAddress = async (orderId: string, newAddress: string) => {
-    if (!kdsUrl) return;
-
     const order = kdsOrders.find((o) => o.id === orderId);
     if (!order) return;
 
@@ -1701,6 +1740,25 @@ export function POSView() {
       )
     );
 
+    if (kdsMode === 'local') {
+      try {
+        await db.init();
+        const existing = await db.get<KDSOrder>('kds_orders', orderId);
+        if (existing) {
+          await db.put('kds_orders', { ...existing, delivery_address: newAddress });
+        }
+        toast.success('Dirección actualizada');
+        setKdsEditingAddress(null);
+      } catch (error) {
+        setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
+        console.error('Error updating local KDS order address:', error);
+        toast.error('Error al actualizar dirección');
+      }
+      return;
+    }
+
+    // Server mode
+    if (!kdsUrl) return;
     try {
       const response = await fetch(`${kdsUrl}/api/orders/${orderId}`, {
         method: 'PUT',
@@ -1711,7 +1769,6 @@ export function POSView() {
       });
 
       if (!response.ok) {
-        // Revert on failure
         setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
         toast.error('Error al actualizar dirección');
       } else {
@@ -1719,7 +1776,6 @@ export function POSView() {
         setKdsEditingAddress(null);
       }
     } catch (error) {
-      // Revert on error
       setKdsOrders((prev) => prev.map((o) => (o.id === orderId ? order : o)));
       console.error('Error updating KDS order address:', error);
       toast.error('Error al actualizar dirección');
@@ -1785,7 +1841,7 @@ export function POSView() {
   };
 
   const saveOrderEdit = async () => {
-    if (!editingKdsOrder || !kdsUrl) return;
+    if (!editingKdsOrder) return;
 
     try {
       // Calculate new total
@@ -1800,36 +1856,48 @@ export function POSView() {
         const today = new Date();
         const [hours, minutes] = editScheduledTime.split(':').map(Number);
         today.setHours(hours, minutes, 0, 0);
-        // If the time is in the past, assume it's for tomorrow
         if (today < new Date()) {
           today.setDate(today.getDate() + 1);
         }
         scheduledTimeISO = today.toISOString();
       }
 
+      const updatePayload = {
+        items: editModalItems,
+        total: newTotal,
+        scheduled_time: scheduledTimeISO,
+        customer_name: editCustomerName || null,
+        order_type: editOrderType,
+        delivery_address:
+          editOrderType === 'delivery' ? editDeliveryAddress || null : null,
+      };
+
+      if (kdsMode === 'local') {
+        await db.init();
+        const existing = await db.get<KDSOrder>('kds_orders', editingKdsOrder.id);
+        if (existing) {
+          await db.put('kds_orders', { ...existing, ...updatePayload });
+        }
+        toast.success(`Pedido #${editingKdsOrder.sale_number} actualizado`);
+        closeEditModal();
+        fetchKdsOrders();
+        return;
+      }
+
+      // Server mode
+      if (!kdsUrl) return;
       const response = await fetch(
         `${kdsUrl}/api/orders/${editingKdsOrder.id}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            items: editModalItems,
-            total: newTotal,
-            scheduled_time: scheduledTimeISO,
-            customer_name: editCustomerName || null,
-            order_type: editOrderType,
-            delivery_address:
-              editOrderType === 'delivery' ? editDeliveryAddress || null : null,
-          }),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatePayload),
         }
       );
 
       if (response.ok) {
         toast.success(`Pedido #${editingKdsOrder.sale_number} actualizado`);
         closeEditModal();
-        // Refresh KDS orders
         fetchKdsOrders();
       } else {
         throw new Error('Failed to update order');
@@ -2901,21 +2969,24 @@ export function POSView() {
     setProductRemovableIngredients(removableByName);
   }, [products, materiaPrima, productMPCache, getProductMateriaPrimaCached]);
 
-  // Calculate combo stock availability
+  // Calculate combo stock availability and numeric stock counts
   useEffect(() => {
     const calculateComboStock = async () => {
       const stockStatus: Record<string, boolean> = {};
+      const stockCounts: Record<string, number> = {};
 
       for (const combo of activeCombos) {
         let comboHasStock = true;
+        let minSlotStock = Infinity;
 
         // Check each slot - a combo is out of stock if any slot has no available products
         for (const slot of combo.slots) {
           // Get products for this slot (use product_ids for both dynamic and fixed slots)
           const slotProductIds = slot.product_ids || [];
 
-          // Check if at least one product in this slot has stock
+          // Find the best available stock among the slot's products
           let slotHasAvailableProduct = false;
+          let bestProductStock = 0;
           for (const productId of slotProductIds) {
             const product = products.find((p) => p.id === productId);
             if (!product || !product.active) continue;
@@ -2926,8 +2997,16 @@ export function POSView() {
 
             if (stock > 0) {
               slotHasAvailableProduct = true;
-              break;
             }
+            if (stock > bestProductStock) {
+              bestProductStock = stock;
+            }
+          }
+
+          // Divide by slot quantity (each combo uses slot.quantity units from that slot)
+          const slotAvailable = Math.floor(bestProductStock / (slot.quantity || 1));
+          if (slotAvailable < minSlotStock) {
+            minSlotStock = slotAvailable;
           }
 
           // If no product has stock in this slot, combo is out of stock
@@ -2938,9 +3017,11 @@ export function POSView() {
         }
 
         stockStatus[combo.id] = comboHasStock;
+        stockCounts[combo.id] = comboHasStock && minSlotStock !== Infinity ? minSlotStock : 0;
       }
 
       setComboStockStatus(stockStatus);
+      setComboStockCounts(stockCounts);
     };
 
     calculateComboStock();
@@ -2949,14 +3030,18 @@ export function POSView() {
   // KDS WebSocket and polling when panel is open
   useEffect(() => {
     if (showKdsPanel) {
-      // Initial fetch - functions check settings from IndexedDB
+      // Initial fetch
       fetchKdsOrders();
 
-      // Connect WebSocket for real-time updates
-      connectKdsWebSocket();
-
-      // Keep polling as fallback (reduced frequency since we have WebSocket)
-      kdsPollingRef.current = setInterval(fetchKdsOrders, 10000);
+      if (kdsMode === 'server') {
+        // Connect WebSocket for real-time updates (server only)
+        connectKdsWebSocket();
+        // Keep polling as fallback (reduced frequency since we have WebSocket)
+        kdsPollingRef.current = setInterval(fetchKdsOrders, 10000);
+      } else if (kdsMode === 'local') {
+        // Local mode: poll at a reasonable interval (no WebSocket)
+        kdsPollingRef.current = setInterval(fetchKdsOrders, 3000);
+      }
     }
 
     return () => {
@@ -2978,7 +3063,7 @@ export function POSView() {
         kdsWsReconnectRef.current = null;
       }
     };
-  }, [showKdsPanel, fetchKdsOrders, connectKdsWebSocket]);
+  }, [showKdsPanel, kdsMode, fetchKdsOrders, connectKdsWebSocket]);
 
   // Focus address input when editing modal opens
   useEffect(() => {
@@ -2999,87 +3084,86 @@ export function POSView() {
         style={{ backgroundColor: 'var(--color-background)' }}
       >
         <div className='flex-1 overflow-auto scrollbar-hide relative'>
-          {/* Sticky Category Filter Bar */}
+          {/* Sticky Filter Container */}
           <div
-            className='sticky top-0 z-20 px-6 pb-1 pt-3 flex items-center justify-between gap-4'
+            className='sticky top-0 z-20'
             style={{ backgroundColor: 'var(--color-background)' }}
           >
-            {/* Category Tabs */}
-            <div className='flex gap-2 overflow-x-auto scrollbar-hide flex-1'>
-              <button
-                onClick={() => setSelectedCategory(null)}
-                className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
-                style={{
-                  backgroundColor:
-                    selectedCategory === null
-                      ? 'var(--color-accent)'
-                      : 'var(--color-background-secondary)',
-                  color:
-                    selectedCategory === null
-                      ? 'var(--color-on-accent)'
-                      : 'var(--color-text)',
-                }}
-              >
-                Todos
-              </button>
-              {categories.map((cat) => (
+            {/* Category Filter Bar */}
+            <div className='px-6 pb-1 pt-3 flex items-center justify-between gap-4'>
+              {/* Category Tabs */}
+              <div className='flex gap-2 overflow-x-auto scrollbar-hide flex-1'>
                 <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all capitalize'
+                  onClick={() => setSelectedCategory(null)}
+                  className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
                   style={{
                     backgroundColor:
-                      selectedCategory === cat
+                      selectedCategory === null
                         ? 'var(--color-accent)'
                         : 'var(--color-background-secondary)',
                     color:
-                      selectedCategory === cat
+                      selectedCategory === null
                         ? 'var(--color-on-accent)'
                         : 'var(--color-text)',
                   }}
                 >
-                  {cat}
+                  Todos
                 </button>
-              ))}
-            </div>
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all capitalize'
+                    style={{
+                      backgroundColor:
+                        selectedCategory === cat
+                          ? 'var(--color-accent)'
+                          : 'var(--color-background-secondary)',
+                      color:
+                        selectedCategory === cat
+                          ? 'var(--color-on-accent)'
+                          : 'var(--color-text)',
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
 
-            {/* Action Buttons */}
-            <div className='flex items-center gap-2 shrink-0'>
-              {kdsEnabled && (
+              {/* Action Buttons */}
+              <div className='flex items-center gap-2 shrink-0'>
                 <button
                   type='button'
-                  onClick={() => setShowKdsPanel(true)}
+                  onClick={toggleLayoutLock}
                   className='p-2 transition-transform'
-                  aria-label='Ver pedidos KDS'
+                  aria-label={
+                    isLayoutLocked
+                      ? 'Desbloquear diseño del POS'
+                      : 'Bloquear diseño del POS'
+                  }
                 >
-                  <Eye size={20} style={{ color: 'var(--color-accent)' }} />
+                  {isLayoutLocked ? (
+                    <Lock size={20} style={{ color: 'var(--color-accent)' }} />
+                  ) : (
+                    <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+                  )}
                 </button>
-              )}
-              <button
-                type='button'
-                onClick={toggleLayoutLock}
-                className='p-2 transition-transform'
-                aria-label={
-                  isLayoutLocked
-                    ? 'Desbloquear diseño del POS'
-                    : 'Bloquear diseño del POS'
-                }
-              >
-                {isLayoutLocked ? (
-                  <Lock size={20} style={{ color: 'var(--color-accent)' }} />
-                ) : (
-                  <Unlock size={20} style={{ color: 'var(--color-accent)' }} />
+                {kdsMode !== 'off' && (
+                  <button
+                    type='button'
+                    onClick={() => setShowKdsPanel(true)}
+                    className='p-2 transition-transform'
+                    aria-label='Ver pedidos KDS'
+                  >
+                    <Eye size={20} style={{ color: 'var(--color-accent)' }} />
+                  </button>
                 )}
-              </button>
+              </div>
             </div>
-          </div>
 
-          {/* Burger Type Filter Row - only show when relevant categories are selected */}
-          {(selectedCategory === null || selectedCategory === 'combos' || selectedCategory === 'hamburguesas') && (
-            <div
-              className='sticky top-0 z-20 px-6 pt-1 pb-3 flex gap-2 overflow-x-auto scrollbar-hide'
-              style={{ backgroundColor: 'var(--color-background)' }}
-            >
+            {/* Burger Type Filter Row - only show when relevant categories are selected */}
+            {(selectedCategory === null || selectedCategory === 'combos' || selectedCategory === 'hamburguesas') && (
+              <div className='px-6 pt-1 pb-3 flex gap-2 overflow-x-auto scrollbar-hide'>
               <button
                 onClick={() => setSelectedBurgerType(null)}
                 className='px-4 py-2 rounded-lg font-semibold text-sm whitespace-nowrap transition-all'
@@ -3144,8 +3228,9 @@ export function POSView() {
               >
                 Triple
               </button>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           <div className='p-6 pt-0'>
             <SortableContext
@@ -3193,6 +3278,7 @@ export function POSView() {
                                 isOutOfStock={
                                   comboStockStatus[combo.id] === false
                                 }
+                                stockCount={comboStockCounts[combo.id] || 0}
                               />
                             ))}
                           </div>
@@ -4038,28 +4124,37 @@ export function POSView() {
                   Pedidos en Cocina (KDS)
                 </h2>
                 {/* Connection Status Indicator */}
-                <span
-                  className='text-xs px-2 py-1 rounded-full font-medium'
-                  style={{
-                    backgroundColor:
-                      kdsConnectionStatus === 'connected'
-                        ? '#10b981'
-                        : kdsConnectionStatus === 'connecting'
-                        ? '#f59e0b'
-                        : kdsConnectionStatus === 'error'
-                        ? '#ef4444'
-                        : '#6b7280',
-                    color: 'white',
-                  }}
-                >
-                  {kdsConnectionStatus === 'connected'
-                    ? 'Conectado'
-                    : kdsConnectionStatus === 'connecting'
-                    ? 'Conectando...'
-                    : kdsConnectionStatus === 'error'
-                    ? 'Error'
-                    : 'Desconectado'}
-                </span>
+                {kdsMode === 'local' ? (
+                  <span
+                    className='text-xs px-2 py-1 rounded-full font-medium'
+                    style={{ backgroundColor: '#8b5cf6', color: 'white' }}
+                  >
+                    Local
+                  </span>
+                ) : (
+                  <span
+                    className='text-xs px-2 py-1 rounded-full font-medium'
+                    style={{
+                      backgroundColor:
+                        kdsConnectionStatus === 'connected'
+                          ? '#10b981'
+                          : kdsConnectionStatus === 'connecting'
+                          ? '#f59e0b'
+                          : kdsConnectionStatus === 'error'
+                          ? '#ef4444'
+                          : '#6b7280',
+                      color: 'white',
+                    }}
+                  >
+                    {kdsConnectionStatus === 'connected'
+                      ? 'Conectado'
+                      : kdsConnectionStatus === 'connecting'
+                      ? 'Conectando...'
+                      : kdsConnectionStatus === 'error'
+                      ? 'Error'
+                      : 'Desconectado'}
+                  </span>
+                )}
               </div>
               <button
                 onClick={() => setShowKdsPanel(false)}
