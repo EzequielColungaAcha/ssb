@@ -17,6 +17,7 @@ import { useSales } from '../hooks/useSales';
 import { CashMovement, Sale, SaleItem } from '../lib/indexeddb';
 import { translations as t } from '../lib/translations';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { ViewLoader } from './LoadingScreen';
 import { Button } from './ui/button';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -301,7 +302,7 @@ export function CashDrawerView() {
   };
 
   if (loading) {
-    return <div className='p-6 dark:text-white'>{t.cashDrawer.loading}</div>;
+    return <ViewLoader />;
   }
 
   const totalCash = getTotalCash();

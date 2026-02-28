@@ -14,6 +14,7 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { db, SaleItem, ProductMateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
+import { ViewLoader } from './LoadingScreen';
 
 interface ProductSales {
   product_id: string;
@@ -24,7 +25,7 @@ interface ProductSales {
 }
 
 export function MetricsView() {
-  const { sales } = useSales();
+  const { sales, loading } = useSales();
   const { products } = useProducts();
   const { materiaPrima, calculateAvailableStock } = useMateriaPrima();
 
@@ -459,6 +460,8 @@ export function MetricsView() {
   useEffect(() => {
     setProductFilter('all');
   }, [categoryFilter]);
+
+  if (loading) return <ViewLoader />;
 
   return (
     <div className='p-6'>

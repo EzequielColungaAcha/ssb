@@ -66,6 +66,7 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { useCombo, ComboSelection } from '../hooks/useCombo';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatPrice, formatNumber } from '../lib/utils';
+import { ViewLoader } from './LoadingScreen';
 
 interface VariableIngredientSelection {
   materia_prima_id: string;
@@ -402,6 +403,7 @@ function SortableCategory({
 export function POSView() {
   const {
     products,
+    loading,
     refresh: refreshProducts,
     updateProduct,
     updateStock,
@@ -3073,6 +3075,8 @@ export function POSView() {
       kdsAddressInputRef.current.focus();
     }
   }, [kdsEditingAddress]);
+
+  if (loading) return <ViewLoader />;
 
   return (
     <DndContext

@@ -15,6 +15,7 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
+import { ViewLoader } from './LoadingScreen';
 import { db, AppSettings, KdsMode, resolveKdsMode } from '../lib/indexeddb';
 
 // Helper function to calculate contrast color (black or white) based on background luminance
@@ -294,6 +295,8 @@ export function SettingsView() {
       setCheckingUpdate(false);
     }
   };
+
+  if (!isInitialized) return <ViewLoader />;
 
   return (
     <div className='p-6 relative'>
