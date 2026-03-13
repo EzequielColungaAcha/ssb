@@ -12,6 +12,7 @@ import {
   Eye,
   EyeOff,
   Power,
+  Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProducts } from '../hooks/useProducts';
@@ -302,6 +303,45 @@ export function ProductsView() {
       toast.success(product.active ? 'Producto desactivado' : 'Producto activado');
     } catch {
       toast.error('Error al cambiar estado');
+    }
+  };
+
+  const handleDuplicate = async (product: Product) => {
+    try {
+      const newId = await addProduct({
+        name: product.name + ' (Copia)',
+        description: product.description,
+        price: product.price,
+        production_cost: product.uses_materia_prima ? 0 : product.production_cost,
+        stock: product.uses_materia_prima ? 0 : product.stock,
+        category: product.category,
+        active: product.active,
+        uses_materia_prima: product.uses_materia_prima || false,
+      });
+
+      if (product.uses_materia_prima && newId) {
+        const items = await getProductMateriaPrima(product.id);
+        const mappedItems = items.map((item) => ({
+          materia_prima_id: item.materia_prima_id,
+          quantity: item.quantity ?? 0,
+          removable: item.removable ?? true,
+          is_variable: item.is_variable,
+          min_quantity: item.min_quantity,
+          max_quantity: item.max_quantity,
+          default_quantity: item.default_quantity,
+          price_per_unit: item.price_per_unit,
+          linked_to: item.linked_to,
+          linked_multiplier: item.linked_multiplier,
+        }));
+        await setProductMateriaPrima(newId, mappedItems);
+        const cost = await calculateProductCost(newId);
+        await updateProduct(newId, { production_cost: cost });
+      }
+
+      toast.success('Producto duplicado exitosamente');
+    } catch (error) {
+      toast.error('Error al duplicar el producto');
+      console.error(error);
     }
   };
 
@@ -1438,6 +1478,17 @@ export function ProductsView() {
                 >
                   <Edit2 size={14} />
                   Editar
+                </button>
+                <button
+                  onClick={() => handleDuplicate(product)}
+                  className='flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg transition-all font-medium text-sm hover:opacity-80'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  <Copy size={14} />
+                  Duplicar
                 </button>
                 <button
                   onClick={() => handleToggleActive(product)}

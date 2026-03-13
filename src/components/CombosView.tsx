@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Edit2, Trash2, Save, X, Package, Download, Eye, EyeOff, Power } from 'lucide-react';
+import { Plus, Edit2, Trash2, Save, X, Package, Download, Eye, EyeOff, Power, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCombo } from '../hooks/useCombo';
 import { useProducts } from '../hooks/useProducts';
@@ -207,6 +207,28 @@ export function CombosView() {
       toast.success(combo.active ? 'Combo desactivado' : 'Combo activado');
     } catch {
       toast.error('Error al cambiar estado');
+    }
+  };
+
+  const handleDuplicateCombo = async (combo: Combo) => {
+    try {
+      await addCombo({
+        name: combo.name + ' (Copia)',
+        description: combo.description,
+        price_type: combo.price_type,
+        fixed_price: combo.fixed_price,
+        discount_type: combo.discount_type,
+        discount_value: combo.discount_value,
+        slots: combo.slots.map((s) => ({
+          ...s,
+          id: crypto.randomUUID(),
+        })),
+        active: combo.active,
+      });
+      toast.success('Combo duplicado exitosamente');
+    } catch (error) {
+      toast.error('Error al duplicar el combo');
+      console.error(error);
     }
   };
 
@@ -1030,8 +1052,20 @@ export function CombosView() {
                         backgroundColor: 'var(--color-background-accent)',
                         color: 'var(--color-text)',
                       }}
+                      title='Editar'
                     >
                       <Edit2 size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleDuplicateCombo(combo)}
+                      className='flex justify-center items-center p-2 rounded-lg transition-colors'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                      }}
+                      title='Duplicar'
+                    >
+                      <Copy size={18} />
                     </button>
                     <button
                       onClick={() => handleToggleActive(combo)}
@@ -1051,6 +1085,7 @@ export function CombosView() {
                     <button
                       onClick={() => handleDelete(combo.id)}
                       className='flex justify-center items-center p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors'
+                      title='Eliminar'
                     >
                       <Trash2 size={18} />
                     </button>
