@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import packageJson from './package.json';
 
-// Plugin to update manifest.json version from package.json
+// Plugin to update manifest.json version and generate version.json from package.json
 const updateManifestVersion = (): Plugin => {
   return {
     name: 'update-manifest-version',
@@ -16,6 +16,17 @@ const updateManifestVersion = (): Plugin => {
         fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
       } catch (error) {
         console.error('Error updating manifest.json:', error);
+      }
+
+      // Generate version.json in public/ so it ends up in dist/
+      const versionJsonPath = path.resolve(__dirname, 'public/version.json');
+      try {
+        fs.writeFileSync(
+          versionJsonPath,
+          JSON.stringify({ version: packageJson.version }) + '\n'
+        );
+      } catch (error) {
+        console.error('Error writing version.json:', error);
       }
     },
   };

@@ -150,6 +150,7 @@ export interface AppSettings {
   free_delivery_threshold?: number; // Cart total above which delivery is free
   hidden_categories?: string[]; // e.g. ["bebidas"] — categories hidden from POS
   hide_combos?: boolean; // true => combos hidden from POS
+  update_url?: string; // URL to fetch version.json for update checks (e.g. GH Pages URL)
   updated_at: string;
 }
 

@@ -43,6 +43,7 @@ export function SettingsView() {
   const [kdsUrl, setKdsUrl] = useState('http://192.168.1.100:3001');
   const [deliveryCharge, setDeliveryCharge] = useState<number>(0);
   const [freeDeliveryThreshold, setFreeDeliveryThreshold] = useState<number>(0);
+  const [updateUrl, setUpdateUrl] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,11 +91,13 @@ export function SettingsView() {
         const loadedKdsUrl = settings?.kds_url || 'http://192.168.1.100:3001';
         const loadedDeliveryCharge = settings?.delivery_charge || 0;
         const loadedFreeDeliveryThreshold = settings?.free_delivery_threshold || 0;
+        const loadedUpdateUrl = settings?.update_url || '';
         
         setKdsMode(loadedKdsMode);
         setKdsUrl(loadedKdsUrl);
         setDeliveryCharge(loadedDeliveryCharge);
         setFreeDeliveryThreshold(loadedFreeDeliveryThreshold);
+        setUpdateUrl(loadedUpdateUrl);
 
         // Mark as initialized after React has processed state updates
         setTimeout(() => {
@@ -141,6 +144,7 @@ export function SettingsView() {
           kds_url: kdsUrl,
           delivery_charge: deliveryCharge,
           free_delivery_threshold: freeDeliveryThreshold,
+          update_url: updateUrl || undefined,
           updated_at: new Date().toISOString(),
         };
         await db.put('app_settings', updatedSettings);
@@ -167,7 +171,7 @@ export function SettingsView() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [isInitialized, colors, acronym, logoImage, kdsMode, kdsUrl, deliveryCharge, freeDeliveryThreshold, syncThemeToKDS, theme]);
+  }, [isInitialized, colors, acronym, logoImage, kdsMode, kdsUrl, deliveryCharge, freeDeliveryThreshold, updateUrl, syncThemeToKDS, theme]);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -249,42 +253,84 @@ export function SettingsView() {
     }
   };
 
+  // Helper: try fetching version.json from a base URL, returns version string or null
+  const fetchVersionJson = async (baseUrl: string): Promise<string | null> => {
+    try {
+      const url = baseUrl.replace(/\/+$/, '') + '/version.json?_t=' + Date.now();
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.version || null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Helper: try fetching version from KDS /health endpoint
+  const fetchVersionFromKds = async (url: string): Promise<string | null> => {
+    try {
+      const response = await fetch(`${url}/health`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data.ssb_version || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const applyUpdate = async (remoteVersion: string) => {
+    toast.success(`${t.settings.updateFound}: v${remoteVersion}`);
+
+    if ('serviceWorker' in navigator) {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map(name => caches.delete(name)));
+
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        await registration.unregister();
+      }
+    }
+
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+  };
+
   const handleCheckForUpdates = async () => {
     setCheckingUpdate(true);
     toast.info(t.settings.checkingUpdates);
 
     try {
-      // Fetch version from KDS server
-      const response = await fetch(`${kdsUrl}/health`);
-      const data = await response.json();
-      const serverVersion = data.ssb_version;
+      let remoteVersion: string | null = null;
 
-      if (!serverVersion) {
-        toast.error(t.settings.updateError);
+      // 1. Try fetching from the app's own origin (auto-detect)
+      const basePath = import.meta.env.BASE_URL || '/';
+      const originUrl = window.location.origin + basePath;
+      remoteVersion = await fetchVersionJson(originUrl);
+
+      // 2. If failed and user has a saved update URL, try that
+      if (!remoteVersion && updateUrl) {
+        remoteVersion = await fetchVersionJson(updateUrl);
+      }
+
+      // 3. If failed and KDS server is configured, try /health
+      if (!remoteVersion && kdsMode === 'server' && kdsUrl) {
+        remoteVersion = await fetchVersionFromKds(kdsUrl);
+      }
+
+      // 4. If all failed, prompt user to set the update URL
+      if (!remoteVersion) {
+        toast.error(
+          'No se pudo verificar actualizaciones. Configurá la URL de actualización más abajo.',
+          { duration: 5000 }
+        );
         setCheckingUpdate(false);
         return;
       }
 
-      if (serverVersion !== __APP_VERSION__) {
-        // Update available - clear cache and reload
-        toast.success(`${t.settings.updateFound}: v${serverVersion}`);
-
-        if ('serviceWorker' in navigator) {
-          // Clear all caches
-          const cacheNames = await caches.keys();
-          await Promise.all(cacheNames.map(name => caches.delete(name)));
-
-          // Unregister service worker
-          const registration = await navigator.serviceWorker.getRegistration();
-          if (registration) {
-            await registration.unregister();
-          }
-        }
-
-        // Reload the page to get fresh content
-        setTimeout(() => {
-          window.location.reload();
-        }, 1000);
+      // 5. Compare versions
+      if (remoteVersion !== __APP_VERSION__) {
+        await applyUpdate(remoteVersion);
       } else {
         toast.info(t.settings.noUpdateAvailable);
         setCheckingUpdate(false);
@@ -364,6 +410,35 @@ export function SettingsView() {
           </span>
         </div>
       </div>
+
+      <Card className='mb-6'>
+        <CardHeader>
+          <CardTitle className='flex items-center gap-2'>
+            <RefreshCw size={24} />
+            Actualizaciones
+          </CardTitle>
+          <CardDescription>
+            URL desde donde se buscan nuevas versiones de la app. Si se deja vacío, se intenta detectar automáticamente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div>
+            <Label htmlFor='update-url'>URL de actualización (opcional)</Label>
+            <Input
+              id='update-url'
+              type='url'
+              value={updateUrl}
+              onChange={(e) => { markModified(); setUpdateUrl(e.target.value); }}
+              placeholder='https://usuario.github.io/mi-app'
+              className='mt-2'
+              disabled={saving}
+            />
+            <p className='text-sm text-gray-500 dark:text-gray-400 mt-2'>
+              Ingresá la URL base donde está publicada la app (ej: GitHub Pages). Se buscará un archivo <code>version.json</code> en esa dirección.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className='mb-6'>
         <CardHeader>

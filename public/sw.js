@@ -39,8 +39,8 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // NEVER cache API requests - always go to network
-  if (url.pathname.startsWith('/api/') || url.pathname === '/health') {
+  // NEVER cache API requests or version.json - always go to network
+  if (url.pathname.startsWith('/api/') || url.pathname === '/health' || url.pathname.endsWith('/version.json')) {
     event.respondWith(fetch(request));
     return;
   }
