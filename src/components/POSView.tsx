@@ -4331,6 +4331,9 @@ export function POSView() {
                             return `${item.product_name}|${removed}`;
                           };
 
+                          const isPapasFritas = (item: KDSOrderItem) =>
+                            item.category?.toLowerCase() === 'papas fritas';
+
                           // Helper to detect combo size (products per combo instance)
                           const detectComboSize = (items: KDSOrderItem[]) => {
                             if (items.length <= 1) return items.length;
@@ -4494,10 +4497,14 @@ export function POSView() {
                                     key={`combo-${comboIdx}-item-${itemIdx}`}
                                     className='text-sm rounded-lg p-2'
                                     style={{
-                                      color: 'var(--color-text)',
-                                      backgroundColor: isEditingThis
+                                      color: isPapasFritas(item) ? '#1c1917' : 'var(--color-text)',
+                                      fontWeight: isPapasFritas(item) ? 800 : undefined,
+                                      background: isPapasFritas(item)
+                                        ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                        : isEditingThis
                                         ? 'var(--color-background-accent)'
                                         : 'transparent',
+                                      borderLeft: isPapasFritas(item) ? '3px solid #b45309' : undefined,
                                       marginLeft: '0.75rem',
                                     }}
                                   >
@@ -4647,10 +4654,14 @@ export function POSView() {
                                 key={`standalone-${standaloneIdx++}`}
                                 className='text-sm rounded-lg p-2'
                                 style={{
-                                  color: 'var(--color-text)',
-                                  backgroundColor: isEditingThis
+                                  color: isPapasFritas(item) ? '#1c1917' : 'var(--color-text)',
+                                  fontWeight: isPapasFritas(item) ? 800 : undefined,
+                                  background: isPapasFritas(item)
+                                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                    : isEditingThis
                                     ? 'var(--color-background-accent)'
                                     : 'transparent',
+                                  borderLeft: isPapasFritas(item) ? '3px solid #b45309' : undefined,
                                 }}
                               >
                                 <div className='flex justify-between items-center'>
