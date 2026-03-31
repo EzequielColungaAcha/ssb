@@ -28,6 +28,22 @@ const updateManifestVersion = (): Plugin => {
       } catch (error) {
         console.error('Error writing version.json:', error);
       }
+
+    },
+    generateBundle() {
+      // Emit sw.js with the version placeholder replaced, so the output
+      // gets a unique cache name per deploy while the source keeps the placeholder.
+      const swPath = path.resolve(__dirname, 'public/sw.js');
+      try {
+        const swContent = fs.readFileSync(swPath, 'utf-8');
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw.js',
+          source: swContent.replace(/__APP_VERSION__/g, packageJson.version),
+        });
+      } catch (error) {
+        console.error('Error injecting version into sw.js:', error);
+      }
     },
   };
 };

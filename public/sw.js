@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ssb-pos-app-v3';
+const CACHE_NAME = 'ssb-pos-app-v__APP_VERSION__';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -45,41 +45,44 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For navigations, try cache, then network, then offline fallback
+  // For navigations: network-first so we always get the latest index.html,
+  // fall back to cache only when offline
   if (request.mode === 'navigate') {
     event.respondWith(
-      caches.match('./index.html').then((cached) => {
-        return (
-          cached || fetch(request).catch(() => caches.match('./index.html'))
-        );
-      })
+      fetch(request)
+        .then((response) => {
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put('./index.html', responseToCache);
+          });
+          return response;
+        })
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }
 
-  // For static assets (JS, CSS, images) → cache-first, then network
+  // For static assets (JS, CSS, images): cache-first, then network
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
       if (cachedResponse) return cachedResponse;
 
-      return fetch(request)
-        .then((response) => {
-          if (
-            !response ||
-            response.status !== 200 ||
-            response.type === 'opaque'
-          ) {
-            return response;
-          }
-
-          const responseToCache = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, responseToCache);
-          });
-
+      return fetch(request).then((response) => {
+        if (
+          !response ||
+          response.status !== 200 ||
+          response.type === 'opaque'
+        ) {
           return response;
-        })
-        .catch(() => cachedResponse);
+        }
+
+        const responseToCache = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(request, responseToCache);
+        });
+
+        return response;
+      });
     })
   );
 });

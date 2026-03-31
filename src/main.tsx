@@ -10,11 +10,22 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register(swUrl).then(
       (registration) => {
         console.log('ServiceWorker registered:', registration.scope);
+
+        // Check for SW updates every 5 minutes
+        setInterval(() => registration.update(), 5 * 60 * 1000);
       },
       (error) => {
         console.log('ServiceWorker registration failed:', error);
       }
     );
+  });
+
+  // When a new SW takes over, reload to avoid stale asset references
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
   });
 }
 
