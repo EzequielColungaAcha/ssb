@@ -1,5 +1,15 @@
 const DB_NAME = 'POS_DB';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
+
+export interface PriceHistoryEntry {
+  id: string;
+  entity_type: 'product' | 'materia_prima';
+  entity_id: string;
+  field: 'price' | 'cost_per_unit' | 'production_cost';
+  previous_value: number;
+  new_value: number;
+  created_at: string;
+}
 
 export interface MateriaPrima {
   id: string;
@@ -34,6 +44,8 @@ export interface Product {
   name: string;
   description?: string;
   price: number;
+  price_type?: 'fixed' | 'markup';
+  markup_percent?: number;
   category: string;
   stock: number;
   active: boolean;
@@ -192,8 +204,9 @@ export interface Combo {
   id: string;
   name: string;
   description?: string;
-  price_type: 'fixed' | 'calculated';
+  price_type: 'fixed' | 'markup' | 'calculated';
   fixed_price?: number;
+  markup_percent?: number;
   discount_type?: 'percentage' | 'fixed';
   discount_value?: number;
   slots: ComboSlot[];
@@ -206,20 +219,30 @@ export interface Combo {
 class IndexedDBService {
   private db: IDBDatabase | null = null;
   private isInitialized = false;
+  private currentName: string | null = null;
 
-  async init(): Promise<void> {
-    if (this.isInitialized && this.db) return;
+  async init(name?: string): Promise<void> {
+    const target = name ?? this.currentName ?? DB_NAME;
+    if (this.isInitialized && this.db && this.currentName === target) return;
+
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+      this.isInitialized = false;
+      this.currentName = null;
+    }
 
     if (typeof indexedDB === 'undefined') {
       throw new Error('IndexedDB is not available in this environment');
     }
 
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      const request = indexedDB.open(target, DB_VERSION);
 
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         this.db = request.result;
+        this.currentName = target;
         this.isInitialized = true;
         resolve();
       };
@@ -314,8 +337,29 @@ class IndexedDBService {
           kdsStore.createIndex('status', 'status', { unique: false });
           kdsStore.createIndex('created_at', 'created_at', { unique: false });
         }
+
+        if (!db.objectStoreNames.contains('price_history')) {
+          const priceHistoryStore = db.createObjectStore('price_history', {
+            keyPath: 'id',
+          });
+          priceHistoryStore.createIndex('entity_id', 'entity_id', {
+            unique: false,
+          });
+          priceHistoryStore.createIndex('entity_type', 'entity_type', {
+            unique: false,
+          });
+        }
       };
     });
+  }
+
+  close(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    this.isInitialized = false;
+    this.currentName = null;
   }
 
   private getStore(
@@ -420,6 +464,7 @@ class IndexedDBService {
       combos,
       app_settings,
       kds_orders,
+      price_history,
     ] = await Promise.all([
       this.getAll<Product>('products'),
       this.getAll<Sale>('sales'),
@@ -432,6 +477,9 @@ class IndexedDBService {
       this.hasStore('combos') ? this.getAll<Combo>('combos') : [],
       this.getAll<AppSettings>('app_settings'),
       this.hasStore('kds_orders') ? this.getAll<KDSOrder>('kds_orders') : [],
+      this.hasStore('price_history')
+        ? this.getAll<PriceHistoryEntry>('price_history')
+        : [],
     ]);
 
     const data = {
@@ -446,6 +494,7 @@ class IndexedDBService {
       combos,
       app_settings,
       kds_orders,
+      price_history,
     };
 
     return JSON.stringify(data, null, 2);
@@ -503,6 +552,12 @@ class IndexedDBService {
         await this.add('kds_orders', order);
       }
     }
+    if (this.hasStore('price_history')) {
+      await this.clear('price_history');
+      for (const entry of data.price_history || []) {
+        await this.add('price_history', entry);
+      }
+    }
   }
 
   async resetDatabase(): Promise<void> {
@@ -522,11 +577,39 @@ class IndexedDBService {
     if (this.hasStore('kds_orders')) {
       promises.push(this.clear('kds_orders'));
     }
+    if (this.hasStore('price_history')) {
+      promises.push(this.clear('price_history'));
+    }
     await Promise.all(promises);
   }
 }
 
 export const db = new IndexedDBService();
+
+export function priceValuesDiffer(previous: number, next: number): boolean {
+  return Math.abs(Number(previous) - Number(next)) > 0.0001;
+}
+
+export async function recordPriceChange(entry: {
+  entity_type: PriceHistoryEntry['entity_type'];
+  entity_id: string;
+  field: PriceHistoryEntry['field'];
+  previous_value: number;
+  new_value: number;
+}): Promise<void> {
+  if (!priceValuesDiffer(entry.previous_value, entry.new_value)) return;
+  await db.init();
+  const row: PriceHistoryEntry = {
+    id: crypto.randomUUID(),
+    entity_type: entry.entity_type,
+    entity_id: entry.entity_id,
+    field: entry.field,
+    previous_value: Number(entry.previous_value),
+    new_value: Number(entry.new_value),
+    created_at: new Date().toISOString(),
+  };
+  await db.add('price_history', row);
+}
 
 /** Resolve kds_mode from settings, handling migration from legacy kds_enabled boolean */
 export function resolveKdsMode(settings?: AppSettings | null): KdsMode {

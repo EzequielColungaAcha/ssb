@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Store,
   Package,
@@ -15,6 +15,8 @@ import {
 import { Toaster } from 'sonner';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { LogoProvider, useLogo } from './contexts/LogoContext';
+import { BusinessProvider } from './contexts/BusinessContext';
+import { BusinessSwitcher } from './components/BusinessSwitcher';
 import { POSView } from './components/POSView';
 import { ProductsView } from './components/ProductsView';
 import { SalesView } from './components/SalesView';
@@ -40,7 +42,7 @@ function AppContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [currentTime, setCurrentTime] = useState('');
   const [needsRefresh, setNeedsRefresh] = useState(false);
-  const { logoConfig, loading: logoLoading } = useLogo();
+  const { loading: logoLoading } = useLogo();
   const { theme, toggleTheme, isLoading: themeLoading } = useTheme();
 
   useEffect(() => {
@@ -149,39 +151,11 @@ function AppContent() {
       <nav
         className={`${
           sidebarCollapsed ? 'w-20' : 'w-72'
-        } shadow-lg flex flex-col transition-all duration-300`}
+        } relative z-20 shadow-lg flex flex-col transition-all duration-300`}
         style={{ backgroundColor: 'var(--color-background-secondary)' }}
       >
         <div className='p-4 border-b dark:border-gray-700'>
-          {!sidebarCollapsed ? (
-            <>
-              <h1
-                className='text-2xl font-bold'
-                style={{ color: 'var(--color-primary)' }}
-              >
-                Súper Smash Burger
-              </h1>
-            </>
-          ) : (
-            <div className='flex justify-center'>
-              {logoConfig.logo_image ? (
-                <div className='w-12 h-12 flex items-center justify-center'>
-                  <img
-                    src={logoConfig.logo_image}
-                    alt='Logo'
-                    className='max-w-full max-h-full object-contain'
-                  />
-                </div>
-              ) : (
-                <div
-                  className='text-2xl font-bold px-2 py-1 rounded'
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {logoConfig.acronym || 'SSB'}
-                </div>
-              )}
-            </div>
-          )}
+          <BusinessSwitcher collapsed={sidebarCollapsed} />
           <div
             className={`mt-3 ${
               sidebarCollapsed
@@ -274,12 +248,14 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <LogoProvider>
-        <AppContent />
-        <Toaster position='top-center' richColors duration={1000} />
-      </LogoProvider>
-    </ThemeProvider>
+    <BusinessProvider>
+      <ThemeProvider>
+        <LogoProvider>
+          <AppContent />
+          <Toaster position='top-center' richColors duration={1000} />
+        </LogoProvider>
+      </ThemeProvider>
+    </BusinessProvider>
   );
 }
 

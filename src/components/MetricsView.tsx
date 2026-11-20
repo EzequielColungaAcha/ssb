@@ -14,6 +14,7 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { db, SaleItem, ProductMateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { SalesChart } from './SalesChart';
+import { ProductDossier } from './ProductDossier';
 import { ViewLoader } from './LoadingScreen';
 
 interface ProductSales {
@@ -1225,6 +1226,16 @@ export function MetricsView() {
           </div>
         </div>
       </div>
+
+      <ProductDossier
+        products={products}
+        materiaPrima={materiaPrima}
+        sales={sales}
+        dateFilter={dateFilter}
+        startDate={startDate}
+        endDate={endDate}
+        specificDate={specificDate}
+      />
     </div>
   );
 }

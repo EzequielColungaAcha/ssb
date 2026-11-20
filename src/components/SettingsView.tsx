@@ -15,6 +15,9 @@ import { Label } from './ui/label';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
 import { DataManagement } from './DataManagement';
+import { DeleteBusinessSection } from './DeleteBusinessSection';
+import { useBusiness } from '../contexts/BusinessContext';
+import { syncActiveBranding } from '../lib/businessRegistry';
 import { ViewLoader } from './LoadingScreen';
 import { db, AppSettings, KdsMode, resolveKdsMode } from '../lib/indexeddb';
 
@@ -32,7 +35,9 @@ function getContrastColor(hexColor: string): string {
 export function SettingsView() {
   const { theme, themeConfig, updateThemeConfig, syncThemeToKDS } = useTheme();
   const { logoConfig, updateLogoConfig } = useLogo();
+  const { business, applyLocal } = useBusiness();
   const [colors, setColors] = useState(themeConfig);
+  const [businessName, setBusinessName] = useState(business.name);
   const [acronym, setAcronym] = useState(logoConfig.acronym);
   const [logoImage, setLogoImage] = useState<string | undefined>(
     logoConfig.logo_image
@@ -127,6 +132,11 @@ export function SettingsView() {
       try {
         await updateThemeConfigRef.current(colors);
         await updateLogoConfigRef.current({ acronym, logo_image: logoImage });
+        const trimmedName = businessName.trim();
+        if (trimmedName) {
+          await syncActiveBranding({ name: trimmedName });
+          applyLocal({ name: trimmedName });
+        }
         await db.init();
         const existingSettings = (await db.get<AppSettings>(
           'app_settings',
@@ -171,7 +181,7 @@ export function SettingsView() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [isInitialized, colors, acronym, logoImage, kdsMode, kdsUrl, deliveryCharge, freeDeliveryThreshold, updateUrl, syncThemeToKDS, theme]);
+  }, [isInitialized, colors, acronym, logoImage, businessName, kdsMode, kdsUrl, deliveryCharge, freeDeliveryThreshold, updateUrl, syncThemeToKDS, theme, applyLocal]);
 
   const handleColorChange = (
     mode: 'light' | 'dark',
@@ -449,6 +459,19 @@ export function SettingsView() {
           <CardDescription>{t.settings.logoSettingsDesc}</CardDescription>
         </CardHeader>
         <CardContent className='space-y-6'>
+          <div>
+            <Label htmlFor='business-name'>Nombre del negocio</Label>
+            <Input
+              id='business-name'
+              value={businessName}
+              onChange={(e) => {
+                markModified();
+                setBusinessName(e.target.value);
+              }}
+              className='mt-2'
+              disabled={saving}
+            />
+          </div>
           <div>
             <Label htmlFor='logo-image'>Logo (PNG, JPG, SVG)</Label>
             <div className='mt-2 space-y-4'>
@@ -966,6 +989,7 @@ export function SettingsView() {
       <div className='mt-6'>
         <DataManagement />
       </div>
+      <DeleteBusinessSection />
     </div>
   );
 }

@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
-import { db, Product } from '../lib/indexeddb';
+import {
+  db,
+  priceValuesDiffer,
+  Product,
+  recordPriceChange,
+} from '../lib/indexeddb';
 
 export function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -44,7 +49,11 @@ export function useProducts() {
     }
   };
 
-  const updateProduct = async (id: string, updates: Partial<Product>) => {
+  const updateProduct = async (
+    id: string,
+    updates: Partial<Product>,
+    options?: { recordHistory?: boolean }
+  ) => {
     try {
       await db.init();
       const existing = await db.get<Product>('products', id);
@@ -56,6 +65,34 @@ export function useProducts() {
         updated_at: new Date().toISOString(),
       };
       await db.put('products', updated);
+
+      if (options?.recordHistory !== false) {
+        if (
+          updates.price !== undefined &&
+          priceValuesDiffer(existing.price, updated.price)
+        ) {
+          await recordPriceChange({
+            entity_type: 'product',
+            entity_id: id,
+            field: 'price',
+            previous_value: existing.price,
+            new_value: updated.price,
+          });
+        }
+        if (
+          updates.production_cost !== undefined &&
+          priceValuesDiffer(existing.production_cost, updated.production_cost)
+        ) {
+          await recordPriceChange({
+            entity_type: 'product',
+            entity_id: id,
+            field: 'production_cost',
+            previous_value: existing.production_cost,
+            new_value: updated.production_cost,
+          });
+        }
+      }
+
       await loadProducts();
     } catch (error) {
       console.error('Error updating product:', error);

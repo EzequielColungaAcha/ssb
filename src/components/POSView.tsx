@@ -66,6 +66,10 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { useCombo, ComboSelection } from '../hooks/useCombo';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatPrice, formatNumber } from '../lib/utils';
+import {
+  defaultComboSelectionsFromSlots,
+  resolveComboPrice,
+} from '../lib/pricing';
 import { ViewLoader } from './LoadingScreen';
 
 interface VariableIngredientSelection {
@@ -252,6 +256,7 @@ interface SortableComboItemProps {
   onOpenComboModal: (combo: Combo) => void;
   isOutOfStock: boolean;
   stockCount: number;
+  displayPrice: number;
 }
 
 function SortableComboItem({
@@ -260,6 +265,7 @@ function SortableComboItem({
   onOpenComboModal,
   isOutOfStock,
   stockCount,
+  displayPrice,
 }: SortableComboItemProps) {
   const {
     attributes,
@@ -321,11 +327,7 @@ function SortableComboItem({
         </div>
         <div>
           <div className='text-2xl font-bold mb-1'>
-            {combo.price_type === 'fixed'
-              ? formatPrice(combo.fixed_price || 0)
-              : combo.discount_type === 'percentage'
-              ? `-${combo.discount_value}%`
-              : `-${formatPrice(combo.discount_value || 0)}`}
+            {formatPrice(displayPrice)}
           </div>
           <div className='flex items-center gap-2'>
           <div className='text-sm opacity-90'>
@@ -582,6 +584,16 @@ export function POSView() {
   >([]);
 
   const activeCombos = useMemo(() => combos.filter((c) => c.active), [combos]);
+  const comboDisplayPrices = useMemo(() => {
+    const prices: Record<string, number> = {};
+    for (const combo of combos) {
+      prices[combo.id] = resolveComboPrice(
+        combo,
+        defaultComboSelectionsFromSlots(combo.slots, products)
+      );
+    }
+    return prices;
+  }, [combos, products]);
 
   // State for sorted combos (for drag and drop)
   const [sortedCombos, setSortedCombos] = useState<Combo[]>([]);
@@ -3285,6 +3297,11 @@ export function POSView() {
                                   comboStockStatus[combo.id] === false
                                 }
                                 stockCount={comboStockCounts[combo.id] || 0}
+                                displayPrice={
+                                  comboDisplayPrices[combo.id] ??
+                                  combo.fixed_price ??
+                                  0
+                                }
                               />
                             ))}
                           </div>
@@ -6103,11 +6120,11 @@ export function POSView() {
             >
               <div className='text-lg font-bold mb-2'>{activeCombo.name}</div>
               <div className='text-2xl font-bold mb-1'>
-                {activeCombo.price_type === 'fixed'
-                  ? formatPrice(activeCombo.fixed_price || 0)
-                  : activeCombo.discount_type === 'percentage'
-                  ? `-${activeCombo.discount_value}%`
-                  : `-${formatPrice(activeCombo.discount_value || 0)}`}
+                {formatPrice(
+                  comboDisplayPrices[activeCombo.id] ??
+                    activeCombo.fixed_price ??
+                    0
+                )}
               </div>
               <div className='text-sm opacity-90'>COMBO</div>
             </button>

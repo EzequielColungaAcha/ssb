@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   db,
   MateriaPrima,
+  priceValuesDiffer,
   ProductMateriaPrima,
   Product,
+  recordPriceChange,
 } from '../lib/indexeddb';
+import { priceFromMarkup } from '../lib/pricing';
 
 export function useMateriaPrima() {
   const [materiaPrima, setMateriaPrima] = useState<MateriaPrima[]>([]);
@@ -100,8 +103,17 @@ export function useMateriaPrima() {
       };
       await db.put('materia_prima', updated);
 
-      // If cost changed, recalculate affected products
-      if (updates.cost_per_unit !== undefined) {
+      if (
+        updates.cost_per_unit !== undefined &&
+        priceValuesDiffer(existing.cost_per_unit, updated.cost_per_unit)
+      ) {
+        await recordPriceChange({
+          entity_type: 'materia_prima',
+          entity_id: id,
+          field: 'cost_per_unit',
+          previous_value: existing.cost_per_unit,
+          new_value: updated.cost_per_unit,
+        });
         await recalculateAffectedProductsCost(id);
       }
 
@@ -324,11 +336,34 @@ export function useMateriaPrima() {
         const cost = await calculateProductCost(productId);
         const product = await db.get<Product>('products', productId);
         if (product && product.uses_materia_prima) {
+          const price =
+            product.price_type === 'markup'
+              ? priceFromMarkup(cost, product.markup_percent ?? 0)
+              : product.price;
           await db.put('products', {
             ...product,
             production_cost: cost,
+            price,
             updated_at: new Date().toISOString(),
           });
+          if (priceValuesDiffer(product.production_cost, cost)) {
+            await recordPriceChange({
+              entity_type: 'product',
+              entity_id: productId,
+              field: 'production_cost',
+              previous_value: product.production_cost,
+              new_value: cost,
+            });
+          }
+          if (priceValuesDiffer(product.price, price)) {
+            await recordPriceChange({
+              entity_type: 'product',
+              entity_id: productId,
+              field: 'price',
+              previous_value: product.price,
+              new_value: price,
+            });
+          }
         }
       }
     } catch (error) {

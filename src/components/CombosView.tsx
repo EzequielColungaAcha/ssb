@@ -6,6 +6,13 @@ import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { Combo, ComboSlot, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice } from '../lib/utils';
+import {
+  applyDiscount,
+  defaultComboSelectionsFromSlots,
+  isValidMarkup,
+  priceFromMarkup,
+  resolveComboPrice,
+} from '../lib/pricing';
 import { ViewLoader } from './LoadingScreen';
 
 interface SlotFormData {
@@ -26,8 +33,9 @@ export function CombosView() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    price_type: 'fixed' as 'fixed' | 'calculated',
+    price_type: 'fixed' as 'fixed' | 'markup',
     fixed_price: '',
+    markup_percent: '',
     discount_type: 'percentage' as 'percentage' | 'fixed',
     discount_value: '',
     active: true,
@@ -94,6 +102,14 @@ export function CombosView() {
       }
     }
 
+    if (
+      formData.price_type === 'markup' &&
+      !isValidMarkup(parseFloat(formData.markup_percent))
+    ) {
+      toast.error('El markup debe ser mayor a 0 y menor a 100');
+      return;
+    }
+
     try {
       const comboSlots: ComboSlot[] = slots.map((s) => ({
         id: s.id,
@@ -104,23 +120,23 @@ export function CombosView() {
         quantity: s.quantity,
       }));
 
+      const isMarkup = formData.price_type === 'markup';
+
       if (editingId) {
         await updateCombo(editingId, {
           name: formData.name,
           description: formData.description,
           price_type: formData.price_type,
-          fixed_price:
-            formData.price_type === 'fixed'
-              ? parseFloat(formData.fixed_price)
-              : undefined,
-          discount_type:
-            formData.price_type === 'calculated'
-              ? formData.discount_type
-              : undefined,
-          discount_value:
-            formData.price_type === 'calculated'
-              ? parseFloat(formData.discount_value)
-              : undefined,
+          fixed_price: isMarkup
+            ? undefined
+            : parseFloat(formData.fixed_price),
+          markup_percent: isMarkup
+            ? parseFloat(formData.markup_percent)
+            : undefined,
+          discount_type: isMarkup ? formData.discount_type : undefined,
+          discount_value: isMarkup
+            ? parseFloat(formData.discount_value) || 0
+            : undefined,
           slots: comboSlots,
           active: formData.active,
         });
@@ -130,18 +146,16 @@ export function CombosView() {
           name: formData.name,
           description: formData.description,
           price_type: formData.price_type,
-          fixed_price:
-            formData.price_type === 'fixed'
-              ? parseFloat(formData.fixed_price)
-              : undefined,
-          discount_type:
-            formData.price_type === 'calculated'
-              ? formData.discount_type
-              : undefined,
-          discount_value:
-            formData.price_type === 'calculated'
-              ? parseFloat(formData.discount_value)
-              : undefined,
+          fixed_price: isMarkup
+            ? undefined
+            : parseFloat(formData.fixed_price),
+          markup_percent: isMarkup
+            ? parseFloat(formData.markup_percent)
+            : undefined,
+          discount_type: isMarkup ? formData.discount_type : undefined,
+          discount_value: isMarkup
+            ? parseFloat(formData.discount_value) || 0
+            : undefined,
           slots: comboSlots,
           active: formData.active,
         });
@@ -159,8 +173,9 @@ export function CombosView() {
     setFormData({
       name: combo.name,
       description: combo.description || '',
-      price_type: combo.price_type,
+      price_type: combo.price_type === 'fixed' ? 'fixed' : 'markup',
       fixed_price: combo.fixed_price?.toString() || '',
+      markup_percent: combo.markup_percent?.toString() || '',
       discount_type: combo.discount_type || 'percentage',
       discount_value: combo.discount_value?.toString() || '',
       active: combo.active,
@@ -217,6 +232,7 @@ export function CombosView() {
         description: combo.description,
         price_type: combo.price_type,
         fixed_price: combo.fixed_price,
+        markup_percent: combo.markup_percent,
         discount_type: combo.discount_type,
         discount_value: combo.discount_value,
         slots: combo.slots.map((s) => ({
@@ -238,6 +254,7 @@ export function CombosView() {
       description: '',
       price_type: 'fixed',
       fixed_price: '',
+      markup_percent: '',
       discount_type: 'percentage',
       discount_value: '',
       active: true,
@@ -370,6 +387,7 @@ export function CombosView() {
               description: combo.description || '',
               price_type: combo.price_type,
               fixed_price: combo.fixed_price,
+              markup_percent: combo.markup_percent,
               discount_type: combo.discount_type,
               discount_value: combo.discount_value,
               slots: slotsData,
@@ -399,6 +417,23 @@ export function CombosView() {
     const product = products.find((p) => p.id === productId);
     return product?.name || 'Producto no encontrado';
   };
+
+  const comboCostPreview = slots.reduce((sum, slot) => {
+    const product = products.find((p) => p.id === slot.default_product_id);
+    return sum + (product?.production_cost || 0) * slot.quantity;
+  }, 0);
+  const comboMarkupPercent = parseFloat(formData.markup_percent);
+  const comboPriceWithMarkup = priceFromMarkup(
+    comboCostPreview,
+    comboMarkupPercent
+  );
+  const comboFinalPrice = Math.round(
+    applyDiscount(
+      comboPriceWithMarkup,
+      formData.discount_type,
+      parseFloat(formData.discount_value) || 0
+    )
+  );
 
   if (loading) {
     return <ViewLoader />;
@@ -558,15 +593,15 @@ export function CombosView() {
                     <input
                       type='radio'
                       name='price_type'
-                      value='calculated'
-                      checked={formData.price_type === 'calculated'}
+                      value='markup'
+                      checked={formData.price_type === 'markup'}
                       onChange={() =>
-                        setFormData({ ...formData, price_type: 'calculated' })
+                        setFormData({ ...formData, price_type: 'markup' })
                       }
                       className='w-4 h-4'
                     />
                     <span style={{ color: 'var(--color-text)' }}>
-                      Calculado con Descuento
+                      Markup (%)
                     </span>
                   </label>
                 </div>
@@ -600,54 +635,26 @@ export function CombosView() {
                 </div>
               )}
 
-              {/* Discount */}
-              {formData.price_type === 'calculated' && (
-                <div className='grid grid-cols-2 gap-4'>
+              {formData.price_type === 'markup' && (
+                <div className='space-y-4'>
                   <div>
                     <label
                       className='block text-sm font-medium mb-1'
                       style={{ color: 'var(--color-text)' }}
                     >
-                      Tipo de Descuento
-                    </label>
-                    <select
-                      value={formData.discount_type}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          discount_type: e.target.value as
-                            | 'percentage'
-                            | 'fixed',
-                        })
-                      }
-                      className='w-full px-3 py-2 border rounded-lg'
-                      style={{
-                        backgroundColor: 'var(--color-background-accent)',
-                        color: 'var(--color-text)',
-                        borderColor: 'var(--color-text)',
-                      }}
-                    >
-                      <option value='percentage'>Porcentaje (%)</option>
-                      <option value='fixed'>Monto Fijo ($)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      className='block text-sm font-medium mb-1'
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      Valor del Descuento
+                      Markup (%)
                     </label>
                     <input
                       type='number'
                       required
-                      min='0'
+                      min='0.01'
+                      max='99.99'
                       step='0.01'
-                      value={formData.discount_value}
+                      value={formData.markup_percent}
                       onChange={(e) =>
                         setFormData({
                           ...formData,
-                          discount_value: e.target.value,
+                          markup_percent: e.target.value,
                         })
                       }
                       className='w-full px-3 py-2 border rounded-lg'
@@ -656,10 +663,106 @@ export function CombosView() {
                         color: 'var(--color-text)',
                         borderColor: 'var(--color-text)',
                       }}
-                      placeholder={
-                        formData.discount_type === 'percentage' ? '10' : '500'
-                      }
+                      placeholder='50'
                     />
+                  </div>
+
+                  <div className='grid grid-cols-2 gap-4'>
+                    <div>
+                      <label
+                        className='block text-sm font-medium mb-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Tipo de Descuento
+                      </label>
+                      <select
+                        value={formData.discount_type}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            discount_type: e.target.value as
+                              | 'percentage'
+                              | 'fixed',
+                          })
+                        }
+                        className='w-full px-3 py-2 border rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                          borderColor: 'var(--color-text)',
+                        }}
+                      >
+                        <option value='percentage'>Porcentaje (%)</option>
+                        <option value='fixed'>Monto Fijo ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        className='block text-sm font-medium mb-1'
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        Valor del Descuento
+                      </label>
+                      <input
+                        type='number'
+                        min='0'
+                        step='0.01'
+                        value={formData.discount_value}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            discount_value: e.target.value,
+                          })
+                        }
+                        className='w-full px-3 py-2 border rounded-lg'
+                        style={{
+                          backgroundColor: 'var(--color-background-accent)',
+                          color: 'var(--color-text)',
+                          borderColor: 'var(--color-text)',
+                        }}
+                        placeholder={
+                          formData.discount_type === 'percentage' ? '10' : '500'
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div
+                    className='p-3 rounded-lg space-y-1'
+                    style={{
+                      backgroundColor: 'var(--color-background-accent)',
+                    }}
+                  >
+                    <p
+                      className='text-sm'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Costo del combo: {formatPrice(comboCostPreview)}
+                    </p>
+                    <p
+                      className='text-sm'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Precio con markup: {formatPrice(comboPriceWithMarkup)}
+                    </p>
+                    <p
+                      className='text-sm font-medium'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Precio final:{' '}
+                      <span
+                        className='font-bold'
+                        style={{ color: 'var(--color-primary)' }}
+                      >
+                        {formatPrice(comboFinalPrice)}
+                      </span>
+                    </p>
+                    {formData.markup_percent &&
+                      !isValidMarkup(comboMarkupPercent) && (
+                        <p className='text-sm text-red-500'>
+                          El markup debe ser mayor a 0 y menor a 100
+                        </p>
+                      )}
                   </div>
                 </div>
               )}
@@ -1026,23 +1129,28 @@ export function CombosView() {
                 </div>
                 <div className='flex items-center gap-4'>
                   <div className='text-right'>
-                    {combo.price_type === 'fixed' ? (
+                    <p
+                      className='font-bold text-lg'
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      {formatPrice(
+                        resolveComboPrice(
+                          combo,
+                          defaultComboSelectionsFromSlots(combo.slots, products)
+                        )
+                      )}
+                    </p>
+                    {combo.price_type !== 'fixed' &&
+                      combo.discount_value ? (
                       <p
-                        className='font-bold text-lg'
-                        style={{ color: 'var(--color-primary)' }}
-                      >
-                        {formatPrice(combo.fixed_price || 0)}
-                      </p>
-                    ) : (
-                      <p
-                        className='font-bold'
-                        style={{ color: 'var(--color-primary)' }}
+                        className='text-xs opacity-70'
+                        style={{ color: 'var(--color-text)' }}
                       >
                         {combo.discount_type === 'percentage'
                           ? `-${combo.discount_value}%`
-                          : `-${formatPrice(combo.discount_value || 0)}`}
+                          : `-${formatPrice(combo.discount_value)}`}
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <div className='flex gap-2'>
                     <button

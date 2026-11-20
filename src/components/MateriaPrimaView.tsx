@@ -5,6 +5,7 @@ import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { MateriaPrima } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
 import { ViewLoader } from './LoadingScreen';
+import { PriceHistoryAccordion } from './PriceHistoryAccordion';
 
 export function MateriaPrimaView() {
   const {
@@ -392,6 +393,13 @@ export function MateriaPrimaView() {
                   </span>
                 </div>
               </div>
+
+              <PriceHistoryAccordion
+                entityType='materia_prima'
+                entityId={mp.id}
+                field='cost_per_unit'
+                label='Historial de costo'
+              />
 
               <div className='flex gap-2 mt-3'>
                 {(mp.unit === 'kg' ? [0.5, 2.5, 10] : [1, 5, 10]).map((amount) => (

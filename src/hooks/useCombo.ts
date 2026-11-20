@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { db, Combo, ComboSlot, Product } from '../lib/indexeddb';
+import { resolveComboPrice } from '../lib/pricing';
 
 export interface VariableIngredientSelection {
   materia_prima_id: string;
@@ -131,10 +132,9 @@ export function useCombo() {
         return combo.fixed_price || 0;
       }
 
-      // Calculated price: sum of products minus discount
       try {
         await db.init();
-        let totalPrice = 0;
+        const selections = [];
 
         for (const selection of selectedProducts) {
           const product = await db.get<Product>(
@@ -142,17 +142,15 @@ export function useCombo() {
             selection.productId
           );
           if (product) {
-            totalPrice += product.price * selection.quantity;
+            selections.push({
+              price: product.price,
+              production_cost: product.production_cost,
+              quantity: selection.quantity,
+            });
           }
         }
 
-        if (combo.discount_type === 'percentage' && combo.discount_value) {
-          totalPrice = totalPrice * (1 - combo.discount_value / 100);
-        } else if (combo.discount_type === 'fixed' && combo.discount_value) {
-          totalPrice = Math.max(0, totalPrice - combo.discount_value);
-        }
-
-        return Math.round(totalPrice);
+        return resolveComboPrice(combo, selections);
       } catch (error) {
         console.error('Error calculating combo price:', error);
         return 0;

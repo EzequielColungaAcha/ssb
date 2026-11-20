@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Plus,
   Edit2,
@@ -19,8 +19,27 @@ import { useProducts } from '../hooks/useProducts';
 import { useMateriaPrima } from '../hooks/useMateriaPrima';
 import { Product, AppSettings, db } from '../lib/indexeddb';
 import { formatPrice, formatNumber } from '../lib/utils';
+import {
+  estimateDraftProductCost,
+  isValidMarkup,
+  priceFromMarkup,
+} from '../lib/pricing';
 import { CombosView } from './CombosView';
 import { ViewLoader } from './LoadingScreen';
+import { PriceHistoryAccordion } from './PriceHistoryAccordion';
+
+const emptyProductForm = {
+  name: '',
+  description: '',
+  price: '',
+  price_type: 'fixed' as 'fixed' | 'markup',
+  markup_percent: '',
+  production_cost: '',
+  stock: '',
+  category: 'hamburguesas',
+  active: true,
+  uses_materia_prima: false,
+};
 
 export function ProductsView() {
   const [activeTab, setActiveTab] = useState<'products' | 'combos'>('products');
@@ -43,16 +62,7 @@ export function ProductsView() {
   >({});
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({
-    name: '',
-    description: '',
-    price: '',
-    production_cost: '',
-    stock: '',
-    category: 'hamburguesas',
-    active: true,
-    uses_materia_prima: false,
-  });
+  const [formData, setFormData] = useState(emptyProductForm);
   const [materiaPrimaItems, setMateriaPrimaItems] = useState<
     Array<{
       materia_prima_id: string;
@@ -67,6 +77,26 @@ export function ProductsView() {
       linked_multiplier: string;
     }>
   >([]);
+
+  const liveCost = useMemo(
+    () =>
+      estimateDraftProductCost(
+        formData.uses_materia_prima,
+        formData.production_cost,
+        materiaPrimaItems,
+        materiaPrima
+      ),
+    [
+      formData.uses_materia_prima,
+      formData.production_cost,
+      materiaPrimaItems,
+      materiaPrima,
+    ]
+  );
+
+  const markupPercent = parseFloat(formData.markup_percent);
+  const computedMarkupPrice =
+    formData.price_type === 'markup' ? priceFromMarkup(liveCost, markupPercent) : 0;
 
   const categories = [
     { value: 'hamburguesas', label: 'Hamburguesas' },
@@ -185,11 +215,23 @@ export function ProductsView() {
     try {
       const usesMateriaPrima = formData.uses_materia_prima;
       const productionCost = parseFloat(formData.production_cost);
+      const priceType = formData.price_type;
+      const parsedMarkup = parseFloat(formData.markup_percent);
 
       if (usesMateriaPrima && materiaPrimaItems.length === 0) {
         toast.error('Agregá al menos un ingrediente de materia prima');
         return;
       }
+
+      if (priceType === 'markup' && !isValidMarkup(parsedMarkup)) {
+        toast.error('El markup debe ser mayor a 0 y menor a 100');
+        return;
+      }
+
+      const salePrice =
+        priceType === 'markup'
+          ? priceFromMarkup(liveCost, parsedMarkup)
+          : parseFloat(formData.price);
 
       let productId = editingId;
 
@@ -197,9 +239,15 @@ export function ProductsView() {
         await updateProduct(editingId, {
           name: formData.name,
           description: formData.description,
-          price: parseFloat(formData.price),
-          production_cost: usesMateriaPrima ? 0 : productionCost,
-          stock: usesMateriaPrima ? 0 : parseInt(formData.stock),
+          price: salePrice,
+          price_type: priceType,
+          markup_percent: priceType === 'markup' ? parsedMarkup : undefined,
+          ...(usesMateriaPrima
+            ? { stock: 0 }
+            : {
+                production_cost: productionCost,
+                stock: parseInt(formData.stock),
+              }),
           category: formData.category,
           active: formData.active,
           uses_materia_prima: usesMateriaPrima,
@@ -208,7 +256,9 @@ export function ProductsView() {
         const newProduct = await addProduct({
           name: formData.name,
           description: formData.description,
-          price: parseFloat(formData.price),
+          price: salePrice,
+          price_type: priceType,
+          markup_percent: priceType === 'markup' ? parsedMarkup : undefined,
           production_cost: usesMateriaPrima ? 0 : productionCost,
           stock: usesMateriaPrima ? 0 : parseInt(formData.stock || '0'),
           category: formData.category,
@@ -234,19 +284,19 @@ export function ProductsView() {
         await setProductMateriaPrima(productId, items);
 
         const cost = await calculateProductCost(productId);
-        await updateProduct(productId, { production_cost: cost });
+        await updateProduct(
+          productId,
+          {
+            production_cost: cost,
+            ...(priceType === 'markup'
+              ? { price: priceFromMarkup(cost, parsedMarkup) }
+              : {}),
+          },
+          { recordHistory: Boolean(editingId) }
+        );
       }
 
-      setFormData({
-        name: '',
-        description: '',
-        price: '',
-        production_cost: '',
-        stock: '',
-        category: 'hamburguesas',
-        active: true,
-        uses_materia_prima: false,
-      });
+      setFormData(emptyProductForm);
       setMateriaPrimaItems([]);
       setShowForm(false);
       setEditingId(null);
@@ -266,6 +316,8 @@ export function ProductsView() {
       name: product.name,
       description: product.description || '',
       price: product.price.toString(),
+      price_type: product.price_type === 'markup' ? 'markup' : 'fixed',
+      markup_percent: product.markup_percent?.toString() || '',
       production_cost: product.production_cost.toString(),
       stock: product.stock.toString(),
       category: product.category,
@@ -312,6 +364,8 @@ export function ProductsView() {
         name: product.name + ' (Copia)',
         description: product.description,
         price: product.price,
+        price_type: product.price_type,
+        markup_percent: product.markup_percent,
         production_cost: product.uses_materia_prima ? 0 : product.production_cost,
         stock: product.uses_materia_prima ? 0 : product.stock,
         category: product.category,
@@ -335,7 +389,12 @@ export function ProductsView() {
         }));
         await setProductMateriaPrima(newId, mappedItems);
         const cost = await calculateProductCost(newId);
-        await updateProduct(newId, { production_cost: cost });
+        await updateProduct(newId, {
+          production_cost: cost,
+          ...(product.price_type === 'markup'
+            ? { price: priceFromMarkup(cost, product.markup_percent ?? 0) }
+            : {}),
+        });
       }
 
       toast.success('Producto duplicado exitosamente');
@@ -368,16 +427,7 @@ export function ProductsView() {
   };
 
   const handleCancel = () => {
-    setFormData({
-      name: '',
-      description: '',
-      price: '',
-      production_cost: '',
-      stock: '',
-      category: 'hamburguesas',
-      active: true,
-      uses_materia_prima: false,
-    });
+    setFormData(emptyProductForm);
     setMateriaPrimaItems([]);
     setShowForm(false);
     setEditingId(null);
@@ -1143,30 +1193,103 @@ export function ProductsView() {
                 </div>
               )}
 
-              <div className='grid grid-cols-2 gap-4'>
-                <div>
-                  <label
-                    className='block text-sm font-medium mb-1'
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    Precio de Venta ($)
+              <div>
+                <label
+                  className='block text-sm font-medium mb-2'
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  Tipo de Precio
+                </label>
+                <div className='flex gap-4'>
+                  <label className='flex items-center gap-2 cursor-pointer'>
+                    <input
+                      type='radio'
+                      name='product_price_type'
+                      value='fixed'
+                      checked={formData.price_type === 'fixed'}
+                      onChange={() =>
+                        setFormData({ ...formData, price_type: 'fixed' })
+                      }
+                      className='w-4 h-4'
+                    />
+                    <span style={{ color: 'var(--color-text)' }}>
+                      Precio Fijo
+                    </span>
                   </label>
-                  <input
-                    type='number'
-                    step='0.01'
-                    required
-                    value={formData.price}
-                    onChange={(e) =>
-                      setFormData({ ...formData, price: e.target.value })
-                    }
-                    className='w-full px-3 py-2 border rounded-lg'
-                    style={{
-                      backgroundColor: 'var(--color-background-accent)',
-                      color: 'var(--color-text)',
-                      borderColor: 'var(--color-text)',
-                    }}
-                  />
+                  <label className='flex items-center gap-2 cursor-pointer'>
+                    <input
+                      type='radio'
+                      name='product_price_type'
+                      value='markup'
+                      checked={formData.price_type === 'markup'}
+                      onChange={() =>
+                        setFormData({ ...formData, price_type: 'markup' })
+                      }
+                      className='w-4 h-4'
+                    />
+                    <span style={{ color: 'var(--color-text)' }}>
+                      Markup (%)
+                    </span>
+                  </label>
                 </div>
+              </div>
+
+              <div className='grid grid-cols-2 gap-4'>
+                {formData.price_type === 'fixed' ? (
+                  <div>
+                    <label
+                      className='block text-sm font-medium mb-1'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Precio de Venta ($)
+                    </label>
+                    <input
+                      type='number'
+                      step='0.01'
+                      required
+                      value={formData.price}
+                      onChange={(e) =>
+                        setFormData({ ...formData, price: e.target.value })
+                      }
+                      className='w-full px-3 py-2 border rounded-lg'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-text)',
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label
+                      className='block text-sm font-medium mb-1'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Markup (%)
+                    </label>
+                    <input
+                      type='number'
+                      step='0.01'
+                      min='0.01'
+                      max='99.99'
+                      required
+                      value={formData.markup_percent}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          markup_percent: e.target.value,
+                        })
+                      }
+                      className='w-full px-3 py-2 border rounded-lg'
+                      style={{
+                        backgroundColor: 'var(--color-background-accent)',
+                        color: 'var(--color-text)',
+                        borderColor: 'var(--color-text)',
+                      }}
+                      placeholder='50'
+                    />
+                  </div>
+                )}
 
                 {!formData.uses_materia_prima && (
                   <div>
@@ -1197,6 +1320,41 @@ export function ProductsView() {
                   </div>
                 )}
               </div>
+
+              {formData.price_type === 'markup' && (
+                <div
+                  className='p-3 rounded-lg space-y-1'
+                  style={{
+                    backgroundColor: 'var(--color-background-accent)',
+                  }}
+                >
+                  {formData.uses_materia_prima && (
+                    <p
+                      className='text-sm'
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      Costo estimado: {formatPrice(liveCost)}
+                    </p>
+                  )}
+                  <p
+                    className='text-sm font-medium'
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    Precio de Venta:{' '}
+                    <span
+                      className='font-bold'
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      {formatPrice(computedMarkupPrice)}
+                    </span>
+                  </p>
+                  {formData.markup_percent && !isValidMarkup(markupPercent) && (
+                    <p className='text-sm text-red-500'>
+                      El markup debe ser mayor a 0 y menor a 100
+                    </p>
+                  )}
+                </div>
+              )}
 
               {!formData.uses_materia_prima && (
                 <div>
@@ -1466,6 +1624,13 @@ export function ProductsView() {
                   </span>
                 </div>
               </div>
+
+              <PriceHistoryAccordion
+                entityType='product'
+                entityId={product.id}
+                field='price'
+                label='Historial de precio'
+              />
 
               <div className='flex gap-2 mt-4'>
                 <button

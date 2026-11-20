@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db, LogoConfig } from '../lib/indexeddb';
+import { syncActiveBranding } from '../lib/businessRegistry';
+import { useBusiness } from './BusinessContext';
 
 interface LogoContextType {
   logoConfig: { acronym: string; logo_image?: string };
@@ -11,6 +13,7 @@ interface LogoContextType {
 const LogoContext = createContext<LogoContextType | undefined>(undefined);
 
 export function LogoProvider({ children }: { children: React.ReactNode }) {
+  const { applyLocal } = useBusiness();
   const [logoConfig, setLogoConfig] = useState<{ acronym: string; logo_image?: string }>({
     acronym: 'SSB',
     logo_image: undefined
@@ -58,6 +61,14 @@ export function LogoProvider({ children }: { children: React.ReactNode }) {
       }
 
       setLogoConfig(config);
+      await syncActiveBranding({
+        acronym: config.acronym,
+        logo_image: config.logo_image,
+      });
+      applyLocal({
+        acronym: config.acronym,
+        logo_image: config.logo_image,
+      });
     } catch (error) {
       console.error('Error updating logo config:', error);
       throw error;
