@@ -490,7 +490,7 @@ export function MetricsView() {
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className='px-4 py-2 rounded-lg border font-semibold'
+              className='select-chevron px-4 py-2 rounded-lg border font-semibold'
               style={{
                 backgroundColor: 'var(--color-background-accent)',
                 color: 'var(--color-text)',
@@ -516,7 +516,7 @@ export function MetricsView() {
               <select
                 value={productFilter}
                 onChange={(e) => setProductFilter(e.target.value)}
-                className='px-4 py-2 rounded-lg border font-semibold'
+                className='select-chevron px-4 py-2 rounded-lg border font-semibold'
                 style={{
                   backgroundColor: 'var(--color-background-accent)',
                   color: 'var(--color-text)',
@@ -543,7 +543,7 @@ export function MetricsView() {
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className='px-4 py-2 rounded-lg border font-semibold'
+              className='select-chevron px-4 py-2 rounded-lg border font-semibold'
               style={{
                 backgroundColor: 'var(--color-background-accent)',
                 color: 'var(--color-text)',

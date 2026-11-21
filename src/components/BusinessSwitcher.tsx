@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useLogo } from '../contexts/LogoContext';
 import { useBusiness } from '../contexts/BusinessContext';
 import { activateBusiness } from '../lib/businessRegistry';
@@ -15,7 +16,7 @@ export function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
   const timerRef = useRef<number | null>(null);
   const originRef = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -25,16 +26,28 @@ export function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
     originRef.current = null;
   };
 
+  const close = () => {
+    setOpen(false);
+    setCreating(false);
+  };
+
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setCreating(false);
-      }
+
+    const main = document.querySelector('main');
+    const previousOverflow = main?.style.overflow ?? '';
+    if (main) main.style.overflow = 'hidden';
+    dialogRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
     };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      if (main) main.style.overflow = previousOverflow;
+    };
   }, [open]);
 
   const onPointerDown = (event: ReactPointerEvent) => {
@@ -75,7 +88,7 @@ export function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 
   return (
-    <div ref={rootRef} className='relative'>
+    <div className='relative'>
       <div
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -121,66 +134,78 @@ export function BusinessSwitcher({ collapsed }: { collapsed: boolean }) {
         </div>
       </div>
 
-      {open && (
-        <div
-          className='absolute left-0 top-full mt-2 z-50 w-72 rounded-lg shadow-xl p-3 space-y-2'
-          style={{
-            backgroundColor: 'var(--color-background-secondary)',
-            color: 'var(--color-text)',
-            border: '1px solid var(--color-background-accent)',
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <p className='text-xs font-semibold opacity-60 px-1'>Negocios</p>
-          <div className='max-h-52 overflow-y-auto space-y-1'>
-            {businesses.map((item) => {
-              const selected = item.id === business.id;
-              return (
+      {open &&
+        createPortal(
+          <div
+            className='fixed inset-0 z-[80] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4'
+            onClick={close}
+          >
+            <div
+              ref={dialogRef}
+              role='dialog'
+              aria-modal='true'
+              aria-label='Cambiar de negocio'
+              tabIndex={-1}
+              className='w-full max-w-sm rounded-lg shadow-xl p-4 space-y-2 outline-none'
+              style={{
+                backgroundColor: 'var(--color-background-secondary)',
+                color: 'var(--color-text)',
+                border: '1px solid var(--color-background-accent)',
+              }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <p className='text-xs font-semibold opacity-60 px-1'>Negocios</p>
+              <div className='max-h-64 overflow-y-auto space-y-1 scrollbar-hide'>
+                {businesses.map((item) => {
+                  const selected = item.id === business.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type='button'
+                      disabled={selected}
+                      onClick={() => activateBusiness(item.id)}
+                      className='w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left disabled:opacity-100'
+                      style={{
+                        backgroundColor: selected
+                          ? 'var(--color-primary)'
+                          : 'transparent',
+                        color: selected
+                          ? 'var(--color-on-primary, #fff)'
+                          : 'var(--color-text)',
+                      }}
+                    >
+                      <span className='text-xs font-bold w-10 shrink-0'>
+                        {item.acronym}
+                      </span>
+                      <span className='text-sm font-medium truncate'>{item.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {creating ? (
+                <div
+                  className='pt-2 border-t'
+                  style={{ borderColor: 'var(--color-background-accent)' }}
+                >
+                  <CreateBusinessForm />
+                </div>
+              ) : (
                 <button
-                  key={item.id}
                   type='button'
-                  disabled={selected}
-                  onClick={() => activateBusiness(item.id)}
-                  className='w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left disabled:opacity-100'
+                  onClick={() => setCreating(true)}
+                  className='w-full px-3 py-2 rounded-lg text-sm font-semibold'
                   style={{
-                    backgroundColor: selected
-                      ? 'var(--color-primary)'
-                      : 'transparent',
-                    color: selected
-                      ? 'var(--color-on-primary, #fff)'
-                      : 'var(--color-text)',
+                    backgroundColor: 'var(--color-background-accent)',
+                    color: 'var(--color-text)',
                   }}
                 >
-                  <span className='text-xs font-bold w-10 shrink-0'>
-                    {item.acronym}
-                  </span>
-                  <span className='text-sm font-medium truncate'>{item.name}</span>
+                  Crear negocio
                 </button>
-              );
-            })}
-          </div>
-          {creating ? (
-            <div
-              className='pt-2 border-t'
-              style={{ borderColor: 'var(--color-background-accent)' }}
-            >
-              <CreateBusinessForm />
+              )}
             </div>
-          ) : (
-            <button
-              type='button'
-              onClick={() => setCreating(true)}
-              className='w-full px-3 py-2 rounded-lg text-sm font-semibold'
-              style={{
-                backgroundColor: 'var(--color-background-accent)',
-                color: 'var(--color-text)',
-              }}
-            >
-              Crear negocio
-            </button>
-          )}
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

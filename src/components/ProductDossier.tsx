@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Bar,
   BarChart,
@@ -74,6 +74,12 @@ export function ProductDossier({
   specificDate,
 }: ProductDossierProps) {
   const [productId, setProductId] = useState('');
+  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (!productId) return;
+    titleRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [productId]);
   const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
   const [history, setHistory] = useState<PriceHistoryEntry[]>([]);
   const [links, setLinks] = useState<ProductMateriaPrima[]>([]);
@@ -268,7 +274,11 @@ export function ProductDossier({
       className='rounded-lg shadow-md p-6 mt-6'
       style={{ backgroundColor: 'var(--color-background-secondary)' }}
     >
-      <h2 className='text-xl font-bold mb-1' style={{ color: 'var(--color-text)' }}>
+      <h2
+        ref={titleRef}
+        className='text-xl font-bold mb-1 scroll-mt-4'
+        style={{ color: 'var(--color-text)' }}
+      >
         Ficha de producto
       </h2>
       <p className='text-sm opacity-60 mb-4' style={{ color: 'var(--color-text)' }}>
@@ -279,7 +289,7 @@ export function ProductDossier({
       <select
         value={productId}
         onChange={(event) => setProductId(event.target.value)}
-        className='w-full max-w-md rounded-lg px-3 py-2 mb-4 border'
+        className='select-chevron w-full max-w-md rounded-lg px-3 py-2 mb-4 border'
         style={{
           backgroundColor: 'var(--color-background)',
           color: 'var(--color-text)',

@@ -366,8 +366,8 @@ export function SalesView() {
   }
 
   return (
-    <div className='p-6'>
-      <div className='mb-6'>
+    <div className='p-6 h-full min-h-0 flex flex-col max-lg:h-auto'>
+      <div className='mb-6 shrink-0'>
         <div className='flex items-center justify-between'>
           <div>
             <h1
@@ -558,12 +558,12 @@ export function SalesView() {
         )}
       </div>
 
-      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
+      <div className='grid grid-cols-1 lg:grid-cols-2 gap-6 lg:flex-1 lg:min-h-0'>
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-6 flex flex-col min-h-0 overflow-hidden max-lg:max-h-[calc(100dvh-6rem)] lg:h-full'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
-          <div className='flex justify-between items-center mb-4'>
+          <div className='flex justify-between items-center mb-4 shrink-0'>
             <h2
               className='text-xl font-bold'
               style={{ color: 'var(--color-text)' }}
@@ -578,7 +578,7 @@ export function SalesView() {
               {hasActiveFilters && ` (de ${sales.length})`}
             </span>
           </div>
-          <div className='space-y-3 max-h-[60vh] overflow-auto scrollbar-hide'>
+          <div className='space-y-3 flex-1 min-h-0 overflow-y-auto scrollbar-hide'>
             {filteredSales.length === 0 ? (
               <div className='text-center text-gray-400 py-8'>
                 {hasActiveFilters ? 'No hay ventas que coincidan con los filtros' : 'Aún no hay ventas'}
@@ -685,15 +685,16 @@ export function SalesView() {
         </div>
 
         <div
-          className='rounded-lg shadow-md p-6'
+          className='rounded-lg shadow-md p-6 flex flex-col min-h-0 overflow-hidden max-lg:max-h-[calc(100dvh-6rem)] lg:h-full'
           style={{ backgroundColor: 'var(--color-background-secondary)' }}
         >
           <h2
-            className='text-xl font-bold mb-4'
+            className='text-xl font-bold mb-4 shrink-0'
             style={{ color: 'var(--color-text)' }}
           >
             Detalles de Venta
           </h2>
+          <div className='flex-1 min-h-0 overflow-y-auto scrollbar-hide'>
           {selectedSale ? (
             <div>
               <div
@@ -1322,6 +1323,7 @@ export function SalesView() {
               Selecciona una venta para ver detalles
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
