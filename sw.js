@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ssb-pos-app-v1.3';
+const CACHE_NAME = 'ssb-pos-app-v1.3.1';
 const PRECACHE_URLS = [
   './',
   './index.html',
